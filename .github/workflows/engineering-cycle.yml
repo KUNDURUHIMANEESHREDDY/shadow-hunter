@@ -1,0 +1,41 @@
+name: Shadow Hunter hourly engineering cycle
+
+on:
+  schedule:
+    # Seven minutes past the hour avoids the top of the hour, when scheduled
+    # workflows are more likely to experience queue delays.
+    - cron: "7 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: shadow-hunter-engineering-cycle
+  cancel-in-progress: false
+
+jobs:
+  engineering-cycle:
+    # Disabled unless explicitly enabled after runner, model auth, cost caps,
+    # and local isolation have all been tested.
+    if: vars.SHADOW_HUNTER_AUTOMATION_ENABLED == 'true' && github.run_started_at < '2026-11-28T00:00:00Z'
+    runs-on: [self-hosted, Windows, X64, shadow-hunter]
+    timeout-minutes: 30
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Verify environment and run one bounded cycle
+        shell: powershell
+        env:
+          SHADOW_HUNTER_AUTOMATION_ENABLED: ${{ vars.SHADOW_HUNTER_AUTOMATION_ENABLED }}
+          SHADOW_HUNTER_DEADLINE_UTC: "2026-11-28T00:00:00Z"
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_RUN_STARTED_AT: ${{ github.run_started_at }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ./scripts/run-cycle.ps1

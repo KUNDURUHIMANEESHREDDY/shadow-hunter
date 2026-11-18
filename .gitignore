@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# Node / frontend
+node_modules/
+dist/
+build/
+coverage/
+
+# Local tooling and runtime state
+.codex/sessions/
+.runner/
+tmp/
+*.log
+.DS_Store
+Thumbs.db
+
+# Semgrep llm-security skill is installed locally only pending its custom
+# license terms review. Do not commit or redistribute this directory.
+.agents/skills/llm-security/
