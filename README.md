@@ -164,10 +164,10 @@ Runs must be serialized. A missed or delayed scheduled event is recorded; do not
 
 | Component | Current state | Evidence / next action |
 |---|---|---|
-| Private GitHub repository | CREATED | Repository exists at the URL above |
+| Private GitHub repository | CREATED; FOUNDATION PUSHED | Commit `353e5c8` on `main`; remote working tree clean |
 | Local Windows clone | CREATED | `C:\Users\himan\projects\shadow-hunter` |
 | Product specification | DRAFTED | This README; refine against final AWS rules |
-| MIT project license | CREATED LOCALLY; STAGED FOR INITIAL COMMIT | Root `LICENSE`; included in staged repository foundation |
+| MIT project license | COMMITTED TO MAIN | Root `LICENSE`; initial repository commit `353e5c8` |
 | Online agent skills | INSTALLED, SCANNED AND REVIEWED | Three license-cleared skills included; Semgrep custom-licensed skill remains local-only; see `docs/skill-review.md` |
 | Codex + Copilot subagents | 14 PROFILES DEFINED; RUNTIME NOT YET VERIFIED | Seven Codex TOML agents and seven Copilot `.agent.md` profiles; frontmatter and tool scopes validate; interactive invocation not yet proven |
 | Application code | NOT STARTED | Create domain model and test harness |
@@ -175,7 +175,7 @@ Runs must be serialized. A missed or delayed scheduled event is recorded; do not
 | AWS integration | NOT STARTED | Validate required Bedrock Managed Agents path |
 | Frontend / trace viewer | NOT STARTED | Build after API and event contracts stabilize |
 | Adversarial benchmark | NOT STARTED | Define fixed corpus and deterministic expected outcomes |
-| GitHub Actions workflow | CREATED LOCALLY; DISABLED BY DEFAULT | Hourly cron at minute 7 UTC; 30-minute timeout; repository variable confirmed `false`; no runner registered |
+| GitHub Actions workflow | COMMITTED, DISABLED BY DEFAULT | Hourly cron at minute 7 UTC; 30-minute timeout; repository variable confirmed `false`; no runner registered |
 | Self-hosted runner | NOT REGISTERED | Must register this machine with `shadow-hunter` label under a restricted runner identity |
 | Autonomous model execution | NOT ENABLED | Codex CLI is authenticated interactively; non-interactive repo inspection was blocked by local CLI sandbox/MCP configuration; unattended auth/quota unverified |
 | Production deployment | NOT STARTED | Requires AWS account/region, billing guard, IAM and deployment validation |

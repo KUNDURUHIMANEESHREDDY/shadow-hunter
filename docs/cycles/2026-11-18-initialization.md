@@ -2,7 +2,7 @@
 
 - Date: 2026-11-18
 - Type: Initial setup
-- Status: Documentation, agent profiles and workflow scaffolding created locally; initial push pending at time of this record.
+- Status: Initial project foundation pushed to the private `main` branch; commit `353e5c8`. Automation remains disabled by default.
 
 ## Completed
 
@@ -28,8 +28,7 @@
 
 ## Remaining blockers
 
-1. Push the verified initial commit to `main`.
-2. Confirm custom-agent invocation in the actual VS Code/Copilot UI; profile syntax is validated but runtime discovery has not been tested.
-3. Resolve Codex non-interactive execution without modifying global user settings, or provision an isolated runner profile.
-4. Register and harden a dedicated self-hosted runner only after reviewing local runner permissions and identity isolation.
-5. Confirm AWS Bedrock Managed Agents and AgentCore Gateway/Policy integration compatibility.
+1. Confirm custom-agent invocation in the actual VS Code/Copilot UI; profile syntax is validated but runtime discovery has not been tested.
+2. Resolve Codex non-interactive execution without modifying global user settings, or provision an isolated runner profile.
+3. Register and harden a dedicated self-hosted runner only after reviewing local runner permissions and identity isolation.
+4. Confirm AWS Bedrock Managed Agents and AgentCore Gateway/Policy integration compatibility.
