@@ -34,16 +34,24 @@ if ($env:GITHUB_REPOSITORY -and $env:GITHUB_REPOSITORY -ne $expectedRepo) {
 $branch = (& git branch --show-current).Trim()
 if ($branch -ne "main") { throw "Refusing to write outside main (current branch: $branch)." }
 
-# Hold the write token in the wrapper only. The model process must never inherit
-# GitHub credentials. Checkout is configured with persist-credentials: false.
+# OpenAI API credentials are supplied by GitHub Actions Secrets. Never put
+# credentials in the repository or include them in the agent prompt.
+if ([string]::IsNullOrWhiteSpace($env:OPENAI_API_KEY)) {
+    throw "OPENAI_API_KEY secret is missing. Add it under Settings > Secrets and variables > Actions."
+}
+$model = if ([string]::IsNullOrWhiteSpace($env:SHADOW_HUNTER_MODEL)) { "gpt-6.1-sol" } else { $env:SHADOW_HUNTER_MODEL.Trim() }
+if ($model -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,100}$') {
+    throw "SHADOW_HUNTER_MODEL contains invalid characters."
+}
+
+# Hold the GitHub write token in the wrapper only. The model process must not
+# inherit GitHub credentials. Checkout is configured with persist-credentials: false.
 $pushToken = $env:GITHUB_TOKEN
 Remove-Item Env:GITHUB_TOKEN -ErrorAction SilentlyContinue
 Remove-Item Env:GH_TOKEN -ErrorAction SilentlyContinue
 
 $codex = Get-Command codex -ErrorAction SilentlyContinue
 if (-not $codex) { throw "Codex CLI is unavailable on this runner." }
-& codex login status
-if ($LASTEXITCODE -ne 0) { throw "Codex authentication is unavailable for the runner identity." }
 
 $promptPath = Join-Path $PSScriptRoot "AGENT_CYCLE_PROMPT.md"
 if (-not (Test-Path $promptPath -PathType Leaf)) { throw "Agent cycle prompt is missing." }
@@ -53,8 +61,8 @@ $tempDir = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempP
 $lastMessage = Join-Path $tempDir "shadow-hunter-$runId-last-message.md"
 $agentLog = Join-Path $tempDir "shadow-hunter-$runId-agent.jsonl"
 
-Write-Output "Starting Shadow Hunter cycle $runId at $([DateTimeOffset]::UtcNow.ToString('o'))"
-$agentOutput = $prompt | & codex exec --approve-for-me --json --output-last-message $lastMessage 2>&1
+Write-Output "Starting Shadow Hunter cycle $runId with model $model at $([DateTimeOffset]::UtcNow.ToString('o'))"
+$agentOutput = $prompt | & codex exec --model $model --approve-for-me --json --output-last-message $lastMessage 2>&1
 $agentExit = $LASTEXITCODE
 $agentOutput | Set-Content -Path $agentLog -Encoding UTF8
 if ($agentExit -ne 0) {
@@ -94,7 +102,7 @@ foreach ($path in $changed) {
     }
 }
 
-$secretPattern = '(?i)(AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|sk-ant-api03-[A-Za-z0-9_-]{60,}|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----)'
+$secretPattern = '(?i)(AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|sk-ant-api03-[A-Za-z0-9_-]{60,}|sk-[A-Za-z0-9_-]{30,}|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----)'
 foreach ($path in $changed) {
     $full = Join-Path $RepoRoot $path
     $content = Get-Content -Raw -ErrorAction Stop $full
