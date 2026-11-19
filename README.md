@@ -4,7 +4,7 @@
 
 > Let agents reason and propose. Make authorization deterministic, external to the model, and auditable.
 
-[Repository](https://github.com/KUNDURUHIMANEESHREDDY/shadow-hunter) · Private project · Initialized 18 November 2026
+[Repository](https://github.com/KUNDURUHIMANEESHREDDY/shadow-hunter) · Public repository · Initialized 18 November 2026
 
 ## Product outcome
 
@@ -164,7 +164,7 @@ Runs must be serialized. A missed or delayed scheduled event is recorded; do not
 
 | Component | Current state | Evidence / next action |
 |---|---|---|
-| Private GitHub repository | CREATED; FOUNDATION PUSHED | Commit `353e5c8` on `main`; remote working tree clean |
+| GitHub repository | PUBLIC; FOUNDATION PUSHED | Commit `353e5c8` on `main`; remote working tree clean |
 | Local Windows clone | CREATED | `C:\Users\himan\projects\shadow-hunter` |
 | Product specification | DRAFTED | This README; refine against final AWS rules |
 | MIT project license | COMMITTED TO MAIN | Root `LICENSE`; initial repository commit `353e5c8` |
@@ -175,9 +175,9 @@ Runs must be serialized. A missed or delayed scheduled event is recorded; do not
 | AWS integration | NOT STARTED | Validate required Bedrock Managed Agents path |
 | Frontend / trace viewer | NOT STARTED | Build after API and event contracts stabilize |
 | Adversarial benchmark | NOT STARTED | Define fixed corpus and deterministic expected outcomes |
-| GitHub Actions workflow | COMMITTED, DISABLED BY DEFAULT | Hourly cron at minute 7 UTC; 30-minute timeout; repository variable confirmed `false`; no runner registered |
-| Self-hosted runner | NOT REGISTERED | Must register this machine with `shadow-hunter` label under a restricted runner identity |
-| Autonomous model execution | NOT ENABLED | Codex CLI is authenticated interactively; non-interactive repo inspection was blocked by local CLI sandbox/MCP configuration; unattended auth/quota unverified |
+| GitHub Actions workflow | CLOUD RUNNER CONFIGURED; DISABLED BY DEFAULT | Hourly cron at minute 7 UTC; Ubuntu hosted runner; 30-minute timeout; requires `OPENAI_API_KEY` secret and `SHADOW_HUNTER_AUTOMATION_ENABLED=true`; see `docs/cloud-model.md` |
+| Self-hosted runner | NOT REQUIRED | Workflow now uses GitHub-hosted Ubuntu compute; user's PC can remain off |
+| Cloud model execution | CONFIGURED, NOT ENABLED | Codex CLI uses OpenAI API key from Actions secret; default model `gpt-6.1-sol`; API billing/access and repository secret still need owner setup |
 | Production deployment | NOT STARTED | Requires AWS account/region, billing guard, IAM and deployment validation |
 
 Only move a row to COMPLETE after adding a commit, test result, deployed resource identifier, or other inspectable evidence. Update this table after every engineering cycle.
@@ -208,15 +208,15 @@ The repository is being initialized on Windows. Once the first application scaff
 
 GitHub Actions compute, AI model usage, AWS service usage, and local machine runtime are separate cost surfaces. The project must not assume that a free GitHub Actions allowance includes model inference.
 
-- Keep the repository private.
-- Prefer a dedicated self-hosted runner only after confirming isolation and repository permissions.
+- Repository visibility is public by owner authorization; committed source and Git history are public.
+- Use GitHub-hosted Ubuntu runners; the user's local machine is not required.
 - GitHub's current billing documentation states that self-hosted runner usage and standard runners on public repositories are free for Actions compute; private GitHub-hosted runner use draws from included quota and may be billed after it is exhausted.
 - Model usage is billed/limited separately by the model provider or Copilot/ChatGPT plan.
 - Keep the scheduled workflow gated by `SHADOW_HUNTER_AUTOMATION_ENABLED`; the default is disabled.
-- The target cadence is 24 × 30-minute runs/day for 10 days: up to 7,200 runner-minutes (120 runner-hours).
+- The workflow is scheduled hourly, with one bounded 30-minute cycle per run. This is not one continuously running 24-hour process.
 - For a private repository using standard GitHub-hosted Linux 2-core runners, GitHub Free currently includes 2,000 minutes/month; 5,200 additional minutes at the documented $0.006/minute baseline would be about $31.20 if the full 7,200 minutes are consumed and the entire included quota is available. Actual cost depends on runner type, existing account usage, and current rates.
-- A self-hosted runner's Actions compute is currently free per GitHub's billing documentation, but the user's PC must stay online and incurs local electricity/hardware use. Reconfirm policy before installation.
-- Model inference / Copilot AI credits are separate from Actions compute. GitHub Copilot plans measure agent, CLI and code-review use with AI credits; the Free plan has limited usage. Codex/ChatGPT account quotas are also separate.
+- GitHub-hosted standard runners for public repositories are generally free for Actions compute under GitHub's current policy; model API usage is billed separately. Reconfirm policy before installation.
+- OpenAI API model inference is separate from Actions compute and ChatGPT subscription usage. An API key with billing/usage access is required; see `docs/cloud-model.md`.
 - Require explicit per-cycle limits and a global kill switch; do not let the agent modify its own spending limits or secrets.
 - Inspect Actions billing and model quota before enabling unattended execution.
 
