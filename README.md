@@ -164,8 +164,8 @@ ChatGPT task automations currently support daily, weekly, and monthly recurring 
 | MIT project license | COMMITTED TO MAIN | Root `LICENSE`; initial repository commit `353e5c8` |
 | Online agent skills | INSTALLED, SCANNED AND REVIEWED | Three license-cleared skills included; Semgrep custom-licensed skill remains local-only; see `docs/skill-review.md` |
 | Codex + Copilot subagents | 14 PROFILES DEFINED; RUNTIME NOT YET VERIFIED | Seven Codex TOML agents and seven Copilot `.agent.md` profiles; frontmatter and tool scopes validate; interactive invocation not yet proven |
-| Application code | NOT STARTED | Create domain model and test harness |
-| Policy engine | NOT STARTED | Implement deterministic ALLOW / DENY / ESCALATE |
+| Application code | INITIAL PYTHON POLICY CORE ADDED — UNTESTED | `src/shadow_hunter/`; trusted-context policy evaluation only |
+| Policy engine | INITIAL DETERMINISTIC CORE ADDED — UNTESTED | Own-order reads and refund-request authorization; see `docs/cycles/2026-11-19-policy-core.md` |
 | AWS integration | NOT STARTED | Validate required Bedrock Managed Agents path |
 | Frontend / trace viewer | NOT STARTED | Build after API and event contracts stabilize |
 | Adversarial benchmark | NOT STARTED | Define fixed corpus and deterministic expected outcomes |
@@ -196,7 +196,7 @@ THIRD_PARTY_NOTICES.md         Skill and dependency attribution
 
 ## Local development
 
-The repository is being initialized on Windows. Once the first application scaffold is committed, this section must contain tested setup commands, required environment variables, local AWS mocking instructions, test commands, and deployment instructions. Do not publish example secrets or real customer records.
+The initial policy core is a Python 3.11+ package with no runtime dependencies. Install the development extra with `python -m pip install -e ".[dev]"`; run the policy suite with `python -m pytest`. These commands are documented but have not been run. The current code does not yet expose an HTTP API, execute business tools, persist audit events, or connect to AWS. Do not publish example secrets or real customer records.
 
 ## Cost and automation policy
 
