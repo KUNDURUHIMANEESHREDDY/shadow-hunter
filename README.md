@@ -146,19 +146,13 @@ Target window: **18–27 November 2026**. The AWS hackathon page currently lists
 
 Dates are planning targets, not evidence that work is complete. If AWS publishes a blocking requirement, update this plan and record the reason.
 
-## Hourly engineering cycle
+## Assistant-led engineering workflow
 
-The intended cadence is **one 30-minute engineering run every hour, 24 runs per day, for 10 days (up to 240 runs)**.
+The owner requested direct code authoring and pushes to `main`, with no tests or checks run during the current development period. Shadow Hunter no longer uses a scheduled GitHub Actions workflow, a self-hosted runner, Codex CLI, or an external model API.
 
-Each run must:
-1. Read the current README, backlog, git status, recent commits, issues, and workflow/test results.
-2. Select one highest-priority, non-duplicate task with explicit acceptance criteria.
-3. Implement a coherent vertical slice or report a concrete blocker.
-4. Run relevant tests, security checks, and `git diff --check`.
-5. Update this README's build status and the durable engineering log.
-6. Commit and push to `main` only when verification passes; never push secrets, fabricated evidence, or unverified work.
+Work is performed in an active ChatGPT session using the connected GitHub integration. The assistant reads current repository context, selects a concrete implementation task, writes code, updates documentation, and pushes changes directly to `main`. Changes are explicitly reported as **untested**. No background work is claimed after the session ends.
 
-Runs must be serialized. A missed or delayed scheduled event is recorded; do not run overlapping sessions to compensate. Each agent run has a hard 30-minute timeout and a ten-day deadline guard. The workflow is gated off until the self-hosted runner and model authentication are configured and verified. Scheduled workflows can be delayed or dropped by GitHub during high load.
+ChatGPT task automations currently support daily, weekly, and monthly recurring schedules, not hourly schedules. They cannot provide 24 separate hourly 30-minute coding sessions or keep this exact model session continuously active in the background. See [engineering workflow](docs/engineering-cycle.md).
 
 ## Build status — 18 November 2026
 
@@ -175,9 +169,9 @@ Runs must be serialized. A missed or delayed scheduled event is recorded; do not
 | AWS integration | NOT STARTED | Validate required Bedrock Managed Agents path |
 | Frontend / trace viewer | NOT STARTED | Build after API and event contracts stabilize |
 | Adversarial benchmark | NOT STARTED | Define fixed corpus and deterministic expected outcomes |
-| GitHub Actions workflow | CLOUD RUNNER CONFIGURED; DISABLED BY DEFAULT | Hourly cron at minute 7 UTC; Ubuntu hosted runner; 30-minute timeout; requires `OPENAI_API_KEY` secret and `SHADOW_HUNTER_AUTOMATION_ENABLED=true`; see `docs/cloud-model.md` |
-| Self-hosted runner | NOT REQUIRED | Workflow now uses GitHub-hosted Ubuntu compute; user's PC can remain off |
-| Cloud model execution | CONFIGURED, NOT ENABLED | Codex CLI uses OpenAI API key from Actions secret; default model `gpt-6.1-sol`; API billing/access and repository secret still need owner setup |
+| GitHub Actions workflow | REMOVED | No unattended runner workflow remains in the repository |
+| Self-hosted runner | REMOVED FROM DESIGN | No runner is used for assistant-led interactive coding |
+| Assistant-led coding | INTERACTIVE ONLY | Work is performed in the active ChatGPT session; no reusable ChatGPT session endpoint or background execution is available |
 | Production deployment | NOT STARTED | Requires AWS account/region, billing guard, IAM and deployment validation |
 
 Only move a row to COMPLETE after adding a commit, test result, deployed resource identifier, or other inspectable evidence. Update this table after every engineering cycle.
