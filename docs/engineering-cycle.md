@@ -6,7 +6,10 @@
 - Maximum job duration: 30 minutes.
 - Target: 24 runs/day for 10 days (up to 240 runs).
 - Concurrency: one run at a time.
-- Default state: DISABLED until the runner, model authentication, billing controls, and branch protection are verified.
+- Default state: DISABLED until the OpenAI API key, model access, billing controls, and branch protection are configured.
+- Compute: GitHub-hosted Ubuntu runner; the user's PC is not required.
+- Model: Codex CLI using the OpenAI API; default model is `gpt-6.1-sol`.
+- Setup: see [cloud model configuration](cloud-model.md).
 - Deadline guard: stop new cycles after 28 November 2026 UTC.
 - No overlapping catch-up runs after a missed tick.
 
@@ -39,4 +42,4 @@ Stop without committing if:
 
 ## Reality of scheduling
 
-GitHub scheduled workflows are not a real-time scheduler: runs may be delayed or dropped during high load. A 30-minute timeout limits a run but does not guarantee it will use exactly 30 minutes. The local Windows runner must be online and connected. Model usage quotas/costs are independent of Actions runner compute.
+GitHub scheduled workflows are not a real-time scheduler: runs may be delayed or dropped during high load. A 30-minute timeout limits a run but does not guarantee it will use exactly 30 minutes. The GitHub-hosted runner is independent of the user's PC. OpenAI API usage quotas/costs are separate from GitHub Actions compute. This hourly workflow is not a single continuous 24-hour process.
