@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "shadow-hunter"
-version = "0.1.0"
-description = "Deterministic authorization core for governed AI agents"
+version = "0.2.0"
+description = "Deterministic authorization and audit for governed AI agents"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
@@ -13,9 +13,17 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+server = ["fastapi>=0.115", "uvicorn[standard]>=0.30"]
+aws = ["boto3>=1.44"]
+
+[project.scripts]
+shadow-hunter-api = "shadow_hunter.api:run"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+shadow_hunter = ["web/*.html"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

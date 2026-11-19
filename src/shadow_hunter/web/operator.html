@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Shadow Hunter · Operator Console</title>
+  <style>
+    :root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#172033;background:#f4f6fa}
+    *{box-sizing:border-box}body{margin:0}.shell{max-width:1180px;margin:0 auto;padding:34px 22px 70px}
+    header{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:26px}
+    h1{font-size:25px;margin:0;font-weight:650;letter-spacing:-.5px}p{color:#667085;margin:7px 0 0}
+    .auth{display:flex;gap:8px;align-items:center}.auth input{width:270px}
+    input,button{font:inherit;border:1px solid #d7dce5;border-radius:10px;padding:10px 12px;background:#fff}
+    button{cursor:pointer;background:#172033;color:white;border-color:#172033}button.secondary{background:#fff;color:#172033}
+    button:disabled{opacity:.45;cursor:not-allowed}.grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-bottom:22px}
+    .metric,.panel{background:white;border:1px solid #e5e9f0;border-radius:15px;padding:17px}
+    .metric span{display:block;font-size:12px;color:#667085}.metric strong{display:block;font-size:27px;margin-top:7px;font-weight:650}
+    .panel{margin-top:16px}.panel h2{font-size:16px;margin:0 0 14px}
+    .table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;font-size:13px}
+    th{text-align:left;color:#667085;font-weight:550;background:#f8f9fb}
+    td,th{padding:11px 10px;border-bottom:1px solid #edf0f4;white-space:nowrap}
+    .pill{display:inline-block;border-radius:100px;padding:4px 8px;font-size:11px;font-weight:650;background:#eef1f6}
+    .ALLOW,.APPROVED,.EXECUTED{background:#e7f5ed;color:#17663a}.DENY,.REJECTED,.EXPIRED{background:#fdecec;color:#9b2727}
+    .ESCALATE,.PENDING{background:#fff3db;color:#8a5a05}.actions{display:flex;gap:6px}
+    .muted{color:#667085}.banner{margin:12px 0;color:#667085;font-size:13px}
+    @media(max-width:850px){.grid{grid-template-columns:repeat(2,1fr)}header{align-items:flex-start;flex-direction:column}.auth{width:100%}.auth input{flex:1;width:auto}}
+  </style>
+</head>
+<body>
+<div class="shell">
+  <header>
+    <div><h1>Shadow Hunter</h1><p>Agent governance · approvals · audit evidence</p></div>
+    <div class="auth">
+      <input id="operator-token" type="password" autocomplete="off" placeholder="Operator bearer token">
+      <button id="connect">Connect</button>
+    </div>
+  </header>
+  <div id="message" class="banner">Enter an operator token to load protected data.</div>
+  <section class="grid" id="metrics">
+    <div class="metric"><span>Refund requests</span><strong>—</strong></div>
+    <div class="metric"><span>Pending approvals</span><strong>—</strong></div>
+    <div class="metric"><span>Approved</span><strong>—</strong></div>
+    <div class="metric"><span>Executed refunds</span><strong>—</strong></div>
+    <div class="metric"><span>Audit events</span><strong>—</strong></div>
+  </section>
+  <section class="panel">
+    <h2>Approval queue</h2>
+    <div class="table-wrap"><table><thead><tr><th>Request</th><th>Order</th><th>Amount</th><th>Policy</th><th>Status</th><th>Action</th></tr></thead><tbody id="approvals"><tr><td colspan="6" class="muted">Connect to load approvals.</td></tr></tbody></table></div>
+  </section>
+  <section class="panel" id="trace-panel" hidden>
+    <h2>Trace details <span id="trace-id" class="muted"></span></h2>
+    <div class="table-wrap"><table><thead><tr><th>Time</th><th>Event</th><th>Decision</th><th>Reason</th><th>Resource</th><th>Details</th></tr></thead><tbody id="trace-events"></tbody></table></div>
+  </section>
+  <section class="panel">
+    <h2>Recent policy and execution events</h2>
+    <div class="table-wrap"><table><thead><tr><th>Time</th><th>Event</th><th>Decision</th><th>Reason</th><th>Actor</th><th>Trace</th></tr></thead><tbody id="audit"><tr><td colspan="6" class="muted">Connect to load audit events.</td></tr></tbody></table></div>
+  </section>
+</div>
+<script>
+(() => {
+  let operatorToken = "";
+  const approvalTokens = new Map();
+  const $ = (id) => document.getElementById(id);
+  const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
+  const headers = () => ({ "Authorization": "Bearer " + operatorToken, "Content-Type": "application/json" });
+  const setMessage = (text, isError=false) => { $("message").textContent = text; $("message").style.color = isError ? "#9b2727" : "#667085"; };
+  async function api(path, options={}) {
+    const response = await fetch(path, {...options, headers: {...headers(), ...(options.headers || {})}});
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.detail || ("Request failed: " + response.status));
+    return payload;
+  }
+  async function load() {
+    if (!operatorToken) return;
+    try {
+      const [overview, approvals, audit] = await Promise.all([
+        api("/v1/operator/overview"), api("/v1/operator/approvals"), api("/v1/operator/audit?limit=100")
+      ]);
+      const values = [overview.refund_requests, overview.pending_approvals, overview.approved_approvals, overview.executed_refunds, overview.audit_events];
+      $("metrics").innerHTML = values.map((value, index) => '<div class="metric"><span>' + ["Refund requests","Pending approvals","Approved","Executed refunds","Audit events"][index] + '</span><strong>' + escapeHtml(value) + '</strong></div>').join("");
+      renderApprovals(approvals);
+      renderAudit(audit);
+      setMessage("Connected. Approval tokens remain in this page's memory and are never written to browser storage.");
+    } catch (error) { setMessage(error.message, true); }
+  }
+  function renderApprovals(rows) {
+    $("approvals").innerHTML = rows.map(row => {
+      const id = escapeHtml(row.approval_id);
+      const tokenAvailable = approvalTokens.has(row.refund_request_id);
+      let action = '<span class="muted">No action</span>';
+      if (row.status === "PENDING") action = '<button data-approve="' + id + '">Approve</button><button class="secondary" data-reject="' + id + '">Reject</button>';
+      if (row.status === "APPROVED" && tokenAvailable) action = '<button data-execute="' + escapeHtml(row.refund_request_id) + '">Execute refund</button>';
+      if (row.status === "APPROVED" && !tokenAvailable) action = '<span class="muted">One-time token unavailable after refresh</span>';
+      return '<tr><td>' + id.slice(0,12) + '…</td><td>' + escapeHtml(row.order_id) + '</td><td>' + escapeHtml(row.amount_minor + " minor units " + row.currency) + '</td><td>' + escapeHtml(row.policy_decision + " · " + row.policy_reason_code) + '</td><td><span class="pill ' + escapeHtml(row.status) + '">' + escapeHtml(row.status) + '</span></td><td><div class="actions">' + action + '</div></td></tr>';
+    }).join("") || '<tr><td colspan="6" class="muted">No approvals yet.</td></tr>';
+  }
+  function renderAudit(rows) {
+    $("audit").innerHTML = rows.map(row => '<tr><td>' + escapeHtml((row.created_at || "").replace("T"," ").slice(0,19)) + '</td><td>' + escapeHtml(row.event_type) + '</td><td><span class="pill ' + escapeHtml(row.decision || "") + '">' + escapeHtml(row.decision || "—") + '</span></td><td>' + escapeHtml(row.reason_code || "—") + '</td><td>' + escapeHtml(row.actor_id || "—") + '</td><td><button class="secondary" data-trace="' + escapeHtml(row.trace_id || "") + '">' + escapeHtml((row.trace_id || "").slice(0,12)) + '…</button></td></tr>').join("") || '<tr><td colspan="6" class="muted">No audit events yet.</td></tr>';
+  }
+  async function showTrace(traceId) {
+    const events = await api("/v1/operator/audit/trace/" + encodeURIComponent(traceId));
+    $("trace-panel").hidden = false;
+    $("trace-id").textContent = traceId;
+    $("trace-events").innerHTML = events.map(row => '<tr><td>' + escapeHtml((row.created_at || "").replace("T"," ").slice(0,19)) + '</td><td>' + escapeHtml(row.event_type) + '</td><td>' + escapeHtml(row.decision || "—") + '</td><td>' + escapeHtml(row.reason_code || "—") + '</td><td>' + escapeHtml(row.resource_id || "—") + '</td><td>' + escapeHtml(JSON.stringify(row.details || {})) + '</td></tr>').join("") || '<tr><td colspan="6" class="muted">No events for this trace.</td></tr>';
+  }
+  $("connect").addEventListener("click", async () => {
+    operatorToken = $("operator-token").value.trim();
+    approvalTokens.clear();
+    await load();
+  });
+  $("approvals").addEventListener("click", async event => {
+    const approveId = event.target.getAttribute("data-approve");
+    const rejectId = event.target.getAttribute("data-reject");
+    const executeId = event.target.getAttribute("data-execute");
+    try {
+      if (approveId) {
+        const result = await api("/v1/operator/approvals/" + encodeURIComponent(approveId) + "/approve", {method:"POST", body:"{}"});
+        const current = (await api("/v1/operator/approvals")).find(item => item.approval_id === approveId);
+        if (current) approvalTokens.set(current.refund_request_id, result.approval_token);
+        setMessage("Approval granted. One-time capability is available only in this tab until execution.");
+      } else if (rejectId) {
+        await api("/v1/operator/approvals/" + encodeURIComponent(rejectId) + "/reject", {method:"POST", body:JSON.stringify({reason:"Rejected in operator console"})});
+        setMessage("Approval rejected.");
+      } else if (executeId) {
+        const token = approvalTokens.get(executeId);
+        if (!token) throw new Error("One-time approval capability is not available in this tab.");
+        await api("/v1/operator/refunds/" + encodeURIComponent(executeId) + "/execute", {method:"POST", body:JSON.stringify({approval_token:token})});
+        approvalTokens.delete(executeId);
+        setMessage("Refund executed in the local demo ledger. No payment provider was called.");
+      }
+      await load();
+    } catch (error) { setMessage(error.message, true); }
+  });
+  $("audit").addEventListener("click", async event => {
+    const traceId = event.target.getAttribute("data-trace");
+    if (!traceId) return;
+    try { await showTrace(traceId); }
+    catch (error) { setMessage(error.message, true); }
+  });
+})();
+</script>
+</body>
+</html>

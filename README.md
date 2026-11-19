@@ -35,8 +35,8 @@ The final demonstration must show both legitimate work succeeding and malicious 
 - `get_order(order_id)` — read an order, constrained to the authenticated customer or an explicitly authorized support role.
 - `check_refund_eligibility(order_id)` — determine eligibility using server-side business rules.
 - `create_refund_request(order_id, amount, reason, idempotency_key)` — create a refund request; this is not a direct payment-provider call.
-- `execute_refund(refund_request_id, approval_token)` — execute only after policy authorization and valid human approval.
-- `request_human_approval(action_digest, reason)` — create a pending approval bound to the exact action and canonical parameters.
+- Refund execution is not exposed as an agent tool. An authenticated operator can execute a pending refund only after approving the exact request and receiving its one-time capability token.
+- Approval creation is part of the controlled gateway path and binds to the stored action digest, principal, resource, and policy version.
 
 ### Example policy outcomes
 
@@ -54,14 +54,14 @@ All limits are configuration, not model discretion. The real business rules and 
 
 ## Architecture direction
 
-The hackathon listing explicitly names **Amazon Bedrock Managed Agents**. That is the required agent-runtime direction unless the final rules say otherwise. AWS also provides **Amazon Bedrock AgentCore Gateway and Policy**, with Cedar policy evaluation at the gateway. We will use those controls where the final Managed Agents integration path supports them, and retain a deterministic application-side enforcement adapter as a second boundary.
+The hackathon listing describes a managed Bedrock agent that must stay within developer-defined rules. The current AWS managed-agent direction is **Amazon Bedrock AgentCore Harness + AgentCore Gateway + Policy in ENFORCE mode**. AWS states that Bedrock Agents Classic stopped accepting new customers on 30 July 2026 and recommends AgentCore for equivalent managed-agent functionality. Shadow Hunter uses the managed Harness invocation API and exposes only refund read/request tools through the governed Gateway; refund execution stays in the separate operator approval path.
 
 ```mermaid
 flowchart TD
   U["Customer / Operator"] --> UI["React Operator Console"]
   UI --> API["Authenticated API"]
-  API --> A["Amazon Bedrock Managed Agent"]
-  A --> G["Controlled Tool Gateway"]
+  API --> A["Amazon Bedrock AgentCore Harness"]
+  A --> G["AgentCore Gateway + App Policy Gate"]
   G --> P["Deterministic Policy Enforcement"]
   P -->|ALLOW| T["Narrow Business Tool"]
   P -->|DENY| D["Block + Audit"]
@@ -79,18 +79,18 @@ flowchart TD
 
 | Layer | Direction |
 |---|---|
-| Agent runtime | Amazon Bedrock Managed Agents, as required by the event |
-| Tool gateway / policy | Amazon Bedrock AgentCore Gateway and Cedar Policy where compatible |
-| Business tools | AWS Lambda |
+| Agent runtime | Amazon Bedrock AgentCore managed Harness; Classic Agents are no longer open to new customers |
+| Tool gateway / policy | AgentCore Gateway with Cedar Policy in ENFORCE mode, plus deterministic application policy |
+| Business tools | Governed FastAPI tool API in the local slice; deploy behind API Gateway/Lambda for AWS |
 | API | Amazon API Gateway |
 | Identity | Amazon Cognito and least-privilege IAM roles |
-| Operational data | DynamoDB initially; choose a relational store only if demonstrated necessary |
+| Operational data | SQLite local/demo adapter; production AWS store not yet implemented |
 | Audit evidence | Structured append-oriented records with a separately protected retention/export path |
-| Frontend | React + TypeScript |
-| Infrastructure | AWS CDK or SAM; choose one after validating the runtime integration |
+| Frontend | Minimal operator console served by FastAPI; a richer frontend remains optional |
+| Infrastructure | Not yet deployed; AgentCore configuration examples and Cedar/OpenAPI templates are committed |
 | Tests | Pytest and deterministic policy/adversarial evaluation harness |
 
-The final hackathon rules and the exact Managed Agents / AgentCore integration contract are not yet published on the event page. Do not claim compliance with requirements that have not been released. Record and resolve this as an architecture decision before deployment.
+The hackathon page still states that full details are coming soon. The checked-in integration targets the current AgentCore Harness API and must be reconciled with any additional event rules when AWS publishes them. No AWS resource has been created or deployed.
 
 ## Security invariants
 
@@ -154,7 +154,7 @@ Work is performed in an active ChatGPT session using the connected GitHub integr
 
 ChatGPT task automations currently support daily, weekly, and monthly recurring schedules, not hourly schedules. They cannot provide 24 separate hourly 30-minute coding sessions or keep this exact model session continuously active in the background. See [engineering workflow](docs/engineering-cycle.md).
 
-## Build status — 18 November 2026
+## Build status — 19 November 2026
 
 | Component | Current state | Evidence / next action |
 |---|---|---|
@@ -164,11 +164,15 @@ ChatGPT task automations currently support daily, weekly, and monthly recurring 
 | MIT project license | COMMITTED TO MAIN | Root `LICENSE`; initial repository commit `353e5c8` |
 | Online agent skills | INSTALLED, SCANNED AND REVIEWED | Three license-cleared skills included; Semgrep custom-licensed skill remains local-only; see `docs/skill-review.md` |
 | Codex + Copilot subagents | 14 PROFILES DEFINED; RUNTIME NOT YET VERIFIED | Seven Codex TOML agents and seven Copilot `.agent.md` profiles; frontmatter and tool scopes validate; interactive invocation not yet proven |
-| Application code | INITIAL PYTHON POLICY CORE ADDED — UNTESTED | `src/shadow_hunter/`; trusted-context policy evaluation only |
-| Policy engine | INITIAL DETERMINISTIC CORE ADDED — UNTESTED | Own-order reads and refund-request authorization; see `docs/cycles/2026-11-19-policy-core.md` |
-| AWS integration | NOT STARTED | Validate required Bedrock Managed Agents path |
-| Frontend / trace viewer | NOT STARTED | Build after API and event contracts stabilize |
-| Adversarial benchmark | NOT STARTED | Define fixed corpus and deterministic expected outcomes |
+| Application code | POLICY CORE + TOOL GATEWAY + API ADDED — UNTESTED | `src/shadow_hunter/`; authenticated tool route, strict tool allowlist and customer/resource checks |
+| Policy engine | DETERMINISTIC ALLOW / DENY / ESCALATE | Own-order reads, refund validation, configured threshold and default-deny unknown tools |
+| AWS integration | AGENTCORE HARNESS INVOKE ADAPTER + CONFIG TEMPLATES ADDED — NOT DEPLOYED | Uses `invoke_harness`; Gateway, Cedar, Harness and OpenAPI templates are in `infra/agentcore/`; end-user JWT propagation remains unresolved |
+| Frontend / trace viewer | OPERATOR CONSOLE + TRACE DETAIL ADDED — UNTESTED | `/operator` displays approval queue, metrics, recent audit, and a per-trace event chain |
+| Approval engine | ADDED — UNTESTED | Parameter/action-digest-bound, expiring, one-time approval capability; token hash stored, raw token returned once |
+| Refund execution | LOCAL DEMO LEDGER ONLY — UNTESTED | Operator-only execution checks approval, expiry, token, stored digest, order state and remaining balance; retry is idempotent |
+| Audit engine | SQLITE EVENT LOG + TRACE QUERY ADDED — UNTESTED | Original request/trace IDs persist through approval and execution events; operators can query the complete trace |
+| Production AWS data plane | NOT IMPLEMENTED | Replace SQLite and local bearer-token mapping with AWS-managed persistence and verified identity before deployment |
+| Adversarial benchmark | TESTS AUTHORED — NOT EXECUTED | Policy, gateway, auth, idempotency and approval paths have behavior-focused tests; formal scoring harness remains |
 | GitHub Actions workflow | REMOVED | No unattended runner workflow remains in the repository |
 | Self-hosted runner | REMOVED FROM DESIGN | No runner is used for assistant-led interactive coding |
 | Assistant-led coding | INTERACTIVE ONLY | Work is performed in the active ChatGPT session; no reusable ChatGPT session endpoint or background execution is available |
@@ -196,7 +200,13 @@ THIRD_PARTY_NOTICES.md         Skill and dependency attribution
 
 ## Local development
 
-The initial policy core is a Python 3.11+ package with no runtime dependencies. Install the development extra with `python -m pip install -e ".[dev]"`; run the policy suite with `python -m pytest`. These commands are documented but have not been run. The current code does not yet expose an HTTP API, execute business tools, persist audit events, or connect to AWS. Do not publish example secrets or real customer records.
+Python 3.11+ is required. Install the API and optional AWS SDK with `python -m pip install -e ".[server,aws,dev]"`, then start the local API with `shadow-hunter-api`. The API listens on `127.0.0.1:8000` by default and serves the operator console at `/operator`.
+
+Configure `SHADOW_HUNTER_CUSTOMER_TOKENS` and `SHADOW_HUNTER_OPERATOR_TOKENS` as JSON maps of opaque bearer tokens to trusted server-side identity claims. Customer entries require `subject_id`, `tenant_id`, and `customer_id`; operator entries require `subject_id`. Do not put tokens in source control or request bodies. The environment-backed token adapter is for local development; production should validate Cognito/JWT identity at API Gateway and pass verified claims to the application.
+
+Set `SHADOW_HUNTER_DB_PATH` to choose the SQLite file, `SHADOW_HUNTER_REFUND_LIMIT_MINOR` for the configured self-service threshold, and `SHADOW_HUNTER_APPROVAL_TTL_SECONDS` for approval expiry. Set `SHADOW_HUNTER_HARNESS_ARN` and `AWS_REGION` to enable the AgentCore Harness chat route using the current Boto3 SigV4 adapter. It passes `runtimeUserId` for runtime context and `actorId` for memory; neither is an authentication credential. AWS documents that SigV4 callers do not propagate per-user identity into downstream tools. Production customer access therefore still requires a Harness CUSTOM_JWT inbound authorizer, Bearer-JWT invocation, and verified identity propagation through AgentCore Identity/Gateway into the application tool boundary. That identity path is not yet implemented. Set `SHADOW_HUNTER_DEMO_MODE=true` to enable the operator-only demo order seed route. The local refund execution updates a demo ledger only; it does not call a payment provider.
+
+These commands and interfaces are documented but have not been run. No AWS resources have been created or deployed.
 
 ## Cost and automation policy
 

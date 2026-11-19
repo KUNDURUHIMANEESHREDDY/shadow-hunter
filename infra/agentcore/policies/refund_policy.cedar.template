@@ -1,0 +1,25 @@
+// Replace <GATEWAY_ARN> with the deployed AgentCore Gateway ARN.
+// Attach the Policy Engine to this Gateway in ENFORCE mode.
+// This outer Cedar policy permits only the three agent-facing tools.
+// Application policy still checks tenant/owner, eligibility, balance,
+// idempotency, and approval before any refund side effect.
+permit(
+    principal,
+    action == AgentCore::Action::"RefundTools___get_order",
+    resource == AgentCore::Gateway::"<GATEWAY_ARN>"
+);
+
+permit(
+    principal,
+    action == AgentCore::Action::"RefundTools___check_refund_eligibility",
+    resource == AgentCore::Gateway::"<GATEWAY_ARN>"
+);
+
+permit(
+    principal,
+    action == AgentCore::Action::"RefundTools___create_refund_request",
+    resource == AgentCore::Gateway::"<GATEWAY_ARN>"
+)
+when {
+    context.input.arguments.amount_minor > 0
+};

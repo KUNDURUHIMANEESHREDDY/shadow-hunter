@@ -1,0 +1,100 @@
+openapi: 3.0.3
+info:
+  title: Shadow Hunter Governed Refund Tools
+  version: 0.1.0
+  description: >
+    AgentCore Gateway OpenAPI target. All operations terminate at the
+    Shadow Hunter application tool boundary. No payment execution operation
+    is exposed to the agent.
+servers:
+  - url: https://REPLACE_WITH_API_HOST
+security:
+  - BearerAuth: []
+paths:
+  /v1/agent/tools/get_order:
+    post:
+      operationId: get_order
+      summary: Read the authenticated customer's own order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderReadRequest"
+      responses:
+        "200":
+          description: Policy decision and order summary
+  /v1/agent/tools/check_refund_eligibility:
+    post:
+      operationId: check_refund_eligibility
+      summary: Check refund eligibility for an owned order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderReadRequest"
+      responses:
+        "200":
+          description: Policy decision and eligibility result
+  /v1/agent/tools/create_refund_request:
+    post:
+      operationId: create_refund_request
+      summary: Create a refund request subject to policy and human approval
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRefundRequest"
+      responses:
+        "200":
+          description: Policy decision, refund request, and approval queue reference
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    OrderReadRequest:
+      type: object
+      additionalProperties: false
+      required: [arguments]
+      properties:
+        arguments:
+          type: object
+          additionalProperties: false
+          required: [order_id]
+          properties:
+            order_id:
+              type: string
+              minLength: 1
+              maxLength: 128
+    CreateRefundRequest:
+      type: object
+      additionalProperties: false
+      required: [arguments]
+      properties:
+        arguments:
+          type: object
+          additionalProperties: false
+          required: [order_id, amount_minor, currency, reason, idempotency_key]
+          properties:
+            order_id:
+              type: string
+              minLength: 1
+              maxLength: 128
+            amount_minor:
+              type: integer
+              minimum: 1
+            currency:
+              type: string
+              pattern: "^[A-Z]{3}$"
+            reason:
+              type: string
+              minLength: 1
+              maxLength: 500
+            idempotency_key:
+              type: string
+              minLength: 8
+              maxLength: 128

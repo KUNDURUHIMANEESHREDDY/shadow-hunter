@@ -25,3 +25,8 @@ Thumbs.db
 # Semgrep llm-security skill is installed locally only pending its custom
 # license terms review. Do not commit or redistribute this directory.
 .agents/skills/llm-security/
+
+# Local application data and account-specific AgentCore configuration
+*.sqlite3
+*.sqlite3-*
+infra/agentcore/**/harness.yaml
