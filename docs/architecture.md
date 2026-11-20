@@ -102,30 +102,41 @@ SQLite remains the default local/demo adapter. Set SHADOW_HUNTER_STORE_BACKEND=d
 Do not deploy, create paid AWS resources, or modify credentials without explicit owner approval.
 
 
-## Local Red/Blue agent exchange
+## Autonomous local Red/Blue evaluation runtime
 
-The repository now includes a deterministic, in-process Red/Blue evaluation harness in
-src/shadow_hunter/agents.py.
+The Red/Blue runtime is an in-process deterministic strategy-and-reasoning harness in
+src/shadow_hunter/agents.py. It does not call an LLM or model-provider API.
 
-- The Red Agent emits a versioned, bounded JSON attack proposal with message, trace,
-  sender, recipient, scenario, and proposed tool-action identifiers.
-- The Blue Agent accepts only the configured Red-to-Blue message shape. It treats the
-  description and arguments as untrusted data and submits the proposed action to the
-  existing ToolGateway; the gateway assigns the Blue Agent identity server-side.
-- The Blue Agent returns only the policy decision, reason code, scenario identifier,
-  and action digest. It never returns order data, refund details, approval capabilities,
-  or raw tool output to the Red Agent.
-- The local scenario factory covers cross-customer reads, direct refund-execution
-  attempts, prompt-injected over-limit requests, and extra policy-override arguments.
-- The simulator correlates A2A send/receive/evaluation events with the gateway policy
-  decision under one trace identifier.
+- Red uses AdversarialStrategyEngine to select a bounded pool of ownership,
+  privilege-escalation, prompt-injection, parameter-tampering, type-confusion,
+  approval-boundary, and legitimate-control scenarios. An observed policy-level
+  attack acceptance increases that strategy family's priority on a later cycle.
+- Blue uses BlueDefenseReasoner to classify untrusted proposal signals, assign a
+  heuristic risk score, and recommend a handling action. This assessment is
+  explanatory, not an authorization decision.
+- Every Blue proposal is submitted to the existing ToolGateway. The deterministic
+  PolicyEngine remains the final authority, and the refund execution tool remains
+  unavailable to agents.
+- Red and Blue messages are HMAC-SHA256 signed using separate agent-specific keys.
+  Verification checks configured sender identity, recipient, timestamp window,
+  payload integrity, and a single-use nonce. Nonce claims persist in SQLite or
+  DynamoDB so a replay is rejected across application workers.
+- The operator can trigger a bounded 1–20 round run. The run uses synthetic
+  customer/order records in a temporary SQLite database. Aggregate metrics,
+  redacted per-case outcomes, and allowlisted A2A/policy trace metadata are
+  written to the primary audit store; raw messages, signatures, and secrets are not.
+- The operator console reports attack success rate, defensive effectiveness,
+  false-denial rate, expected policy-decision accuracy, and per-case reasoning
+  evidence.
 
-This is an executable application-layer prototype, not a remote A2A transport,
-cryptographically authenticated agent identity system, or autonomous LLM Red/Blue
-pair. A production transport must authenticate each agent independently (for example,
-with mutually authenticated service identity), enforce replay and rate limits, and
-preserve the same gateway boundary. No AWS integration or deployment is implied.
+The HMAC envelope authenticates messages among processes that share configured
+secrets; it is not a remote network transport, public-key identity system, or
+replacement for TLS/mTLS. The current runtime is a deterministic autonomous
+evaluation loop, not two LLM-driven agents. Risk scores are heuristic and must
+not be interpreted as calibrated probabilities.
 
+See docs/agent-evaluation.md for key configuration, metric definitions, and
+operator usage.
 
 ## AgntID-facing MCP server
 

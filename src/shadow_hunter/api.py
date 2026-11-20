@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -15,11 +16,19 @@ from .agentcore import (
     AgentCoreInvocationError,
     AgentCoreNotConfigured,
 )
+from .agents import (
+    A2AConfigurationError,
+    A2AProtocolError,
+    AgentAuthenticator,
+    AdversarialStrategyEngine,
+    EvaluationMetrics,
+    RedBlueSimulation,
+)
 from .approvals import ApprovalService
 from .auth import build_authenticator_from_environment
 from .gateway import GatewayError, ToolGateway
 from .mcp_server import build_mcp_runtime
-from .policy import PolicyConfig, PolicyEngine
+from .policy import PolicyConfig, PolicyEngine, Principal
 from .store import SQLiteStore, StoreError
 
 
@@ -289,6 +298,192 @@ def create_app(
             refund_eligible=True,
         )
         return {"status": "seeded", "order_id": "order-demo-001"}
+
+    @app.post("/v1/operator/agent-evaluations/run")
+    def run_agent_evaluation(
+        body: dict[str, Any] = Body(default={}),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        operator_id = operator(authorization)
+        if set(body) - {"rounds"}:
+            raise HTTPException(status_code=422, detail="Only rounds is accepted")
+        rounds = body.get("rounds", 8)
+        if isinstance(rounds, bool) or not isinstance(rounds, int) or not 1 <= rounds <= 20:
+            raise HTTPException(status_code=422, detail="rounds must be an integer between 1 and 20")
+        try:
+            agent_authenticator = AgentAuthenticator.from_environment()
+            red_key_id = agent_authenticator.key_id_for_agent("red-agent")
+            blue_key_id = agent_authenticator.key_id_for_agent("blue-agent")
+        except A2AConfigurationError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+        run_id = str(uuid4())
+        try:
+            # Every proposed action is evaluated against synthetic orders in a
+            # disposable database. Only redacted case outcomes are copied into
+            # the primary audit store; no live customer orders are exposed.
+            synthetic_balance = max(refund_limit * 2, 30_000)
+            with tempfile.TemporaryDirectory(prefix="shadow-hunter-eval-") as sandbox:
+                evaluation_store = SQLiteStore(Path(sandbox) / "evaluation.sqlite3")
+                evaluation_store.add_order(
+                    order_id="evaluation-order-own",
+                    tenant_id="evaluation-tenant",
+                    customer_id="evaluation-customer",
+                    currency="USD",
+                    refundable_minor=synthetic_balance,
+                    refund_eligible=True,
+                )
+                evaluation_store.add_order(
+                    order_id="evaluation-order-foreign",
+                    tenant_id="evaluation-tenant",
+                    customer_id="evaluation-other-customer",
+                    currency="USD",
+                    refundable_minor=synthetic_balance,
+                    refund_eligible=True,
+                )
+                evaluation_principal = Principal(
+                    subject_id="evaluation-subject",
+                    tenant_id="evaluation-tenant",
+                    customer_id="evaluation-customer",
+                    authenticated=True,
+                )
+                evaluation_gateway = ToolGateway(
+                    evaluation_store,
+                    PolicyEngine(
+                        PolicyConfig(self_service_refund_limit_minor=refund_limit)
+                    ),
+                    ApprovalService(evaluation_store, ttl_seconds=approval_ttl),
+                )
+                strategies = AdversarialStrategyEngine.for_refund_workload(
+                    own_order_id="evaluation-order-own",
+                    foreign_order_id="evaluation-order-foreign",
+                    currency="USD",
+                    refundable_minor=synthetic_balance,
+                    self_service_limit_minor=refund_limit,
+                )
+                simulation = RedBlueSimulation(
+                    store=evaluation_store,
+                    gateway=evaluation_gateway,
+                    authenticator=agent_authenticator,
+                    red_key_id=red_key_id,
+                    blue_key_id=blue_key_id,
+                    # The persistent store makes nonce replay detection survive
+                    # across operator-triggered runs and application workers.
+                    nonce_store=store,
+                )
+                observations = simulation.run_autonomous_loop(
+                    strategies,
+                    principal=evaluation_principal,
+                    rounds=rounds,
+                )
+                metrics = EvaluationMetrics.from_observations(observations)
+                trace_evidence = []
+                safe_detail_keys = {
+                    "scenario_id", "strategy_id", "round", "is_attack",
+                    "expected_decision", "actual_decision", "expected_reason_code",
+                    "passed", "attack_prevented", "attack_success", "risk_score",
+                    "threat_categories", "recommended_action", "message_id",
+                    "sender_id", "recipient_id", "message_type", "key_id",
+                    "authenticated", "tool_name", "agent_id",
+                }
+                for observation in observations:
+                    for event in evaluation_store.get_trace_events(observation.trace_id):
+                        source_details = event.get("details") or {}
+                        trace_evidence.append({
+                            "sandbox_trace_id": observation.trace_id,
+                            "request_id": event.get("request_id") or observation.proposal_message_id,
+                            "event_type": event.get("event_type"),
+                            "decision": event.get("decision"),
+                            "reason_code": event.get("reason_code"),
+                            "actor_id": event.get("actor_id"),
+                            "resource_id": event.get("resource_id"),
+                            "action_digest": event.get("action_digest"),
+                            "policy_id": event.get("policy_id"),
+                            "policy_version": event.get("policy_version"),
+                            "details": {
+                                key: source_details[key]
+                                for key in safe_detail_keys
+                                if key in source_details
+                            },
+                        })
+        except (A2AProtocolError, A2AConfigurationError, StoreError, ValueError) as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Agent evaluation could not complete safely",
+            ) from exc
+
+        summary = metrics.to_dict()
+        store.append_audit(
+            event_type="AGENT_EVALUATION_RUN",
+            trace_id=run_id,
+            request_id=run_id,
+            actor_id=operator_id,
+            tenant_id="evaluation-sandbox",
+            details={
+                **summary,
+                "run_id": run_id,
+                "runtime": "local_deterministic",
+                "sandbox": "isolated_synthetic_sqlite",
+                "rounds_requested": rounds,
+                "agent_authentication": "hmac_sha256",
+            },
+        )
+        for trace_event in trace_evidence:
+            store.append_audit(
+                event_type="AGENT_EVALUATION_TRACE_EVENT",
+                trace_id=run_id,
+                request_id=trace_event["request_id"],
+                decision=trace_event["decision"],
+                reason_code=trace_event["reason_code"],
+                actor_id=trace_event["actor_id"],
+                tenant_id="evaluation-sandbox",
+                resource_id=trace_event["resource_id"],
+                action_digest=trace_event["action_digest"],
+                policy_id=trace_event["policy_id"],
+                policy_version=trace_event["policy_version"],
+                details={
+                    "sandbox_trace_id": trace_event["sandbox_trace_id"],
+                    "source_event_type": trace_event["event_type"],
+                    **trace_event["details"],
+                },
+            )
+
+        result_rows = []
+        for observation in observations:
+            result = {
+                "scenario_id": observation.scenario_id,
+                "strategy_id": observation.strategy_id,
+                "round": observation.round_number,
+                "is_attack": observation.is_attack,
+                "decision": observation.decision.value,
+                "reason_code": observation.reason_code,
+                "risk_score": observation.risk_score,
+                "threat_categories": list(observation.threat_categories),
+                "recommended_action": observation.recommended_action,
+                "attack_prevented": observation.attack_prevented,
+                "attack_success": observation.attack_success,
+                "passed": observation.passed,
+            }
+            result_rows.append(result)
+            store.append_audit(
+                event_type="AGENT_EVALUATION_RESULT",
+                trace_id=run_id,
+                request_id=observation.proposal_message_id,
+                decision=observation.decision.value,
+                reason_code=observation.reason_code,
+                actor_id="blue-agent",
+                tenant_id="evaluation-sandbox",
+                resource_id=observation.scenario_id,
+                details=result,
+            )
+        return {"run_id": run_id, **summary, "results": result_rows}
+
+    @app.get("/v1/operator/agent-evaluations/latest")
+    def latest_agent_evaluation(
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        operator(authorization)
+        return store.latest_agent_evaluation()
 
     # The MCP endpoint is /mcp/ (the mount prefix plus the SDK root path).
     # Its host protection remains localhost-only until an explicit allowlist

@@ -47,6 +47,26 @@
     <h2>Approval queue</h2>
     <div class="table-wrap"><table><thead><tr><th>Request</th><th>Order</th><th>Amount</th><th>Policy</th><th>Status</th><th>Action</th></tr></thead><tbody id="approvals"><tr><td colspan="6" class="muted">Connect to load approvals.</td></tr></tbody></table></div>
   </section>
+  <section class="panel" id="agent-evaluation">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap">
+      <div>
+        <h2>Red/Blue autonomous security evaluation</h2>
+        <p>Bounded multi-round evaluation in an isolated synthetic-data sandbox. HMAC agent keys must be configured on the server.</p>
+      </div>
+      <button id="run-agent-evaluation">Run 8-round evaluation</button>
+    </div>
+    <div class="grid" id="agent-eval-metrics" style="margin-top:16px;margin-bottom:8px">
+      <div class="metric"><span>Attack attempts</span><strong>—</strong></div>
+      <div class="metric"><span>Attack success rate</span><strong>—</strong></div>
+      <div class="metric"><span>Defensive effectiveness</span><strong>—</strong></div>
+      <div class="metric"><span>False-denial rate</span><strong>—</strong></div>
+      <div class="metric"><span>Policy accuracy</span><strong>—</strong></div>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Round</th><th>Strategy</th><th>Scenario</th><th>Decision</th><th>Risk</th><th>Threat categories</th><th>Outcome</th></tr></thead>
+      <tbody id="agent-eval-results"><tr><td colspan="7" class="muted">Connect to load the latest evaluation.</td></tr></tbody>
+    </table></div>
+  </section>
   <section class="panel" id="trace-panel" hidden>
     <h2>Trace details <span id="trace-id" class="muted"></span></h2>
     <div class="table-wrap"><table><thead><tr><th>Time</th><th>Event</th><th>Decision</th><th>Reason</th><th>Resource</th><th>Details</th></tr></thead><tbody id="trace-events"></tbody></table></div>
@@ -73,13 +93,17 @@
   async function load() {
     if (!operatorToken) return;
     try {
-      const [overview, approvals, audit] = await Promise.all([
-        api("/v1/operator/overview"), api("/v1/operator/approvals"), api("/v1/operator/audit?limit=100")
+      const [overview, approvals, audit, agentEvaluation] = await Promise.all([
+        api("/v1/operator/overview"),
+        api("/v1/operator/approvals"),
+        api("/v1/operator/audit?limit=100"),
+        api("/v1/operator/agent-evaluations/latest")
       ]);
       const values = [overview.refund_requests, overview.pending_approvals, overview.approved_approvals, overview.executed_refunds, overview.audit_events];
       $("metrics").innerHTML = values.map((value, index) => '<div class="metric"><span>' + ["Refund requests","Pending approvals","Approved","Executed refunds","Audit events"][index] + '</span><strong>' + escapeHtml(value) + '</strong></div>').join("");
       renderApprovals(approvals);
       renderAudit(audit);
+      renderAgentEvaluation(agentEvaluation);
       setMessage("Connected. Approval tokens remain in this page's memory and are never written to browser storage.");
     } catch (error) { setMessage(error.message, true); }
   }
@@ -94,6 +118,41 @@
       return '<tr><td>' + id.slice(0,12) + '…</td><td>' + escapeHtml(row.order_id) + '</td><td>' + escapeHtml(row.amount_minor + " minor units " + row.currency) + '</td><td>' + escapeHtml(row.policy_decision + " · " + row.policy_reason_code) + '</td><td><span class="pill ' + escapeHtml(row.status) + '">' + escapeHtml(row.status) + '</span></td><td><div class="actions">' + action + '</div></td></tr>';
     }).join("") || '<tr><td colspan="6" class="muted">No approvals yet.</td></tr>';
   }
+  function percent(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? (number * 100).toFixed(1) + "%" : "—";
+  }
+  function renderAgentEvaluation(snapshot) {
+    const run = snapshot && snapshot.run;
+    if (!run) {
+      $("agent-eval-results").innerHTML = '<tr><td colspan="7" class="muted">No evaluation has been run yet.</td></tr>';
+      return;
+    }
+    const details = run.details || {};
+    const values = [
+      [details.attack_attempts, "Attack attempts"],
+      [percent(details.attack_success_rate), "Attack success rate"],
+      [percent(details.defensive_effectiveness), "Defensive effectiveness"],
+      [percent(details.false_denial_rate), "False-denial rate"],
+      [percent(details.policy_decision_accuracy), "Policy accuracy"]
+    ];
+    $("agent-eval-metrics").innerHTML = values.map(item =>
+      '<div class="metric"><span>' + escapeHtml(item[1]) + '</span><strong>' + escapeHtml(item[0] ?? "—") + '</strong></div>'
+    ).join("");
+    const rows = snapshot.results || [];
+    $("agent-eval-results").innerHTML = rows.map(row => {
+      const outcome = row.attack_success ? "ATTACK ACCEPTED" :
+        (row.passed ? (row.is_attack ? "PREVENTED" : "CONTROL PASSED") : "EXPECTATION MISSED");
+      const outcomeClass = row.attack_success ? "DENY" : (row.passed ? "ALLOW" : "ESCALATE");
+      return '<tr><td>' + escapeHtml(row.details?.round ?? row.round ?? "—") +
+        '</td><td>' + escapeHtml(row.details?.strategy_id ?? row.strategy_id ?? "—") +
+        '</td><td>' + escapeHtml(row.details?.scenario_id ?? row.resource_id ?? "—") +
+        '</td><td><span class="pill ' + escapeHtml(row.decision || "") + '">' + escapeHtml(row.decision || "—") +
+        '</span></td><td>' + escapeHtml(row.details?.risk_score ?? row.risk_score ?? "—") +
+        '</td><td>' + escapeHtml((row.details?.threat_categories || row.threat_categories || []).join(", ")) +
+        '</td><td><span class="pill ' + outcomeClass + '">' + outcome + '</span></td></tr>';
+    }).join("") || '<tr><td colspan="7" class="muted">No scenario outcomes.</td></tr>';
+  }
   function renderAudit(rows) {
     $("audit").innerHTML = rows.map(row => '<tr><td>' + escapeHtml((row.created_at || "").replace("T"," ").slice(0,19)) + '</td><td>' + escapeHtml(row.event_type) + '</td><td><span class="pill ' + escapeHtml(row.decision || "") + '">' + escapeHtml(row.decision || "—") + '</span></td><td>' + escapeHtml(row.reason_code || "—") + '</td><td>' + escapeHtml(row.actor_id || "—") + '</td><td><button class="secondary" data-trace="' + escapeHtml(row.trace_id || "") + '">' + escapeHtml((row.trace_id || "").slice(0,12)) + '…</button></td></tr>').join("") || '<tr><td colspan="6" class="muted">No audit events yet.</td></tr>';
   }
@@ -107,6 +166,27 @@
     operatorToken = $("operator-token").value.trim();
     approvalTokens.clear();
     await load();
+  });
+  $("run-agent-evaluation").addEventListener("click", async () => {
+    const button = $("run-agent-evaluation");
+    if (!operatorToken) { setMessage("Connect with an operator token first.", true); return; }
+    button.disabled = true;
+    button.textContent = "Running…";
+    try {
+      const result = await api("/v1/operator/agent-evaluations/run", {
+        method: "POST",
+        body: JSON.stringify({rounds: 8})
+      });
+      await load();
+      setMessage("Evaluation " + result.run_id.slice(0, 12) + "… completed: " +
+        result.attacks_prevented + "/" + result.attack_attempts +
+        " attacks prevented; success rate " + percent(result.attack_success_rate) + ".");
+    } catch (error) {
+      setMessage(error.message, true);
+    } finally {
+      button.disabled = false;
+      button.textContent = "Run 8-round evaluation";
+    }
   });
   $("approvals").addEventListener("click", async event => {
     const approveId = event.target.getAttribute("data-approve");

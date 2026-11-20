@@ -747,6 +747,77 @@ class DynamoDBStore:
             "ledger": "dynamodb_demo",
         }
 
+    def claim_a2a_nonce(
+        self,
+        *,
+        nonce: str,
+        agent_id: str,
+        message_id: str,
+        expires_at_epoch: int,
+    ) -> bool:
+        """Claim a signed A2A nonce once using a conditional DynamoDB write."""
+        if (
+            not isinstance(nonce, str) or not nonce or len(nonce) > 128
+            or not isinstance(agent_id, str) or not agent_id or len(agent_id) > 128
+            or not isinstance(message_id, str) or not message_id or len(message_id) > 128
+            or isinstance(expires_at_epoch, bool)
+            or not isinstance(expires_at_epoch, int)
+        ):
+            raise ValueError("Invalid A2A replay-guard record")
+        now_epoch = int(utc_now().timestamp())
+        if expires_at_epoch <= now_epoch:
+            return False
+        try:
+            self._table.put_item(
+                Item={
+                    "PK": f"A2A_NONCE#{nonce}",
+                    "SK": "META",
+                    "entity_type": "A2A_NONCE",
+                    "agent_id": agent_id,
+                    "message_id": message_id,
+                    "expires_at_epoch": expires_at_epoch,
+                    "ttl_epoch": expires_at_epoch,
+                },
+                ConditionExpression=(
+                    "attribute_not_exists(PK) OR expires_at_epoch < :now"
+                ),
+                ExpressionAttributeValues={":now": now_epoch},
+            )
+        except Exception as exc:
+            code = (
+                getattr(exc, "response", {})
+                .get("Error", {})
+                .get("Code")
+            )
+            if code == "ConditionalCheckFailedException":
+                return False
+            raise StoreError("Could not persist A2A replay guard") from exc
+        return True
+
+    def latest_agent_evaluation(self) -> dict[str, Any]:
+        """Return the latest redacted evaluation summary and its case events."""
+        events = self.list_audit(limit=500)
+        run = next(
+            (event for event in events if event.get("event_type") == "AGENT_EVALUATION_RUN"),
+            None,
+        )
+        if run is None:
+            return {"run": None, "results": []}
+        return {
+            "run": run,
+            "results": self.list_agent_evaluation_results(run["trace_id"]),
+        }
+
+    def list_agent_evaluation_results(
+        self, run_id: str
+    ) -> list[dict[str, Any]]:
+        events = self.get_trace_events(run_id, limit=200)
+        return [
+            event
+            for event in events
+            if event.get("event_type") == "AGENT_EVALUATION_RESULT"
+        ]
+
     def append_audit(
         self,
         *,

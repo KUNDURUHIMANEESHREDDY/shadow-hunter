@@ -15,6 +15,7 @@ The adapter uses one DynamoDB table with a composite primary key:
 | Refund-to-approval pointer | REFUND#<refund_id> | APPROVAL |
 | Idempotency claim | IDEMP#<tenant_id> | KEY#<sha256(key)> |
 | Trace audit event | TRACE#<trace_id> | EVENT#<timestamp>#<event_id> |
+| A2A replay nonce | A2A_NONCE#<nonce> | META |
 | Counters | STATS | COUNTERS |
 
 GSI1 serves two operator-console views:
@@ -55,8 +56,9 @@ Review the template and estimated on-demand usage/cost before deploying:
     aws cloudformation deploy --template-file infra/data/dynamodb.yaml --stack-name shadow-hunter-data --parameter-overrides Environment=production --region <approved-region>
 
 The table is on-demand, encrypted with the AWS-managed DynamoDB KMS key,
-configured with 35-day point-in-time recovery, deletion protection in
-production, and Retain policies for stack deletion/replacement.
+configured with 35-day point-in-time recovery and TTL cleanup for expired A2A
+nonce claims, deletion protection in production, and Retain policies for stack
+deletion/replacement.
 
 After deployment, configure:
 - SHADOW_HUNTER_STORE_BACKEND=dynamodb

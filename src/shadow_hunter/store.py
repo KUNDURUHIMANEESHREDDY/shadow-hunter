@@ -136,6 +136,16 @@ class SQLiteStore:
                     consumed_at TEXT
                 );
 
+                CREATE TABLE IF NOT EXISTS a2a_nonces (
+                    nonce TEXT PRIMARY KEY,
+                    agent_id TEXT NOT NULL,
+                    message_id TEXT NOT NULL,
+                    expires_at_epoch INTEGER NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_a2a_nonce_expiry
+                    ON a2a_nonces(expires_at_epoch);
+
                 CREATE TABLE IF NOT EXISTS audit_events (
                     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
                     event_id TEXT NOT NULL UNIQUE,
@@ -572,6 +582,87 @@ class SQLiteStore:
                 "idempotent_replay": False,
                 "ledger": "local_demo",
             }
+
+    def claim_a2a_nonce(
+        self,
+        *,
+        nonce: str,
+        agent_id: str,
+        message_id: str,
+        expires_at_epoch: int,
+    ) -> bool:
+        """Atomically claim a signed A2A nonce once, shared across API workers."""
+        if (
+            not isinstance(nonce, str)
+            or not nonce
+            or len(nonce) > 128
+            or not isinstance(agent_id, str)
+            or not agent_id
+            or len(agent_id) > 128
+            or not isinstance(message_id, str)
+            or not message_id
+            or len(message_id) > 128
+            or isinstance(expires_at_epoch, bool)
+            or not isinstance(expires_at_epoch, int)
+        ):
+            raise ValueError("Invalid A2A replay-guard record")
+        now_epoch = int(utc_now().timestamp())
+        if expires_at_epoch <= now_epoch:
+            return False
+        with self._transaction() as conn:
+            conn.execute(
+                "DELETE FROM a2a_nonces WHERE expires_at_epoch < ?",
+                (now_epoch,),
+            )
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO a2a_nonces (
+                        nonce, agent_id, message_id, expires_at_epoch
+                    ) VALUES (?, ?, ?, ?)
+                    """,
+                    (nonce, agent_id, message_id, expires_at_epoch),
+                )
+            except sqlite3.IntegrityError:
+                return False
+        return True
+
+    def latest_agent_evaluation(self) -> dict[str, Any]:
+        """Return the latest redacted aggregate and case outcomes, if present."""
+        with self._reader() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM audit_events
+                WHERE event_type = 'AGENT_EVALUATION_RUN'
+                ORDER BY sequence DESC LIMIT 1
+                """
+            ).fetchone()
+        if row is None:
+            return {"run": None, "results": []}
+        run = dict(row)
+        run["details"] = json.loads(run.pop("details_json"))
+        results = self.list_agent_evaluation_results(run["trace_id"])
+        return {"run": run, "results": results}
+
+    def list_agent_evaluation_results(
+        self, run_id: str
+    ) -> list[dict[str, Any]]:
+        with self._reader() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM audit_events
+                WHERE event_type = 'AGENT_EVALUATION_RESULT'
+                  AND trace_id = ?
+                ORDER BY sequence ASC
+                """,
+                (run_id,),
+            ).fetchall()
+        results = []
+        for row in rows:
+            item = dict(row)
+            item["details"] = json.loads(item.pop("details_json"))
+            results.append(item)
+        return results
 
     def append_audit(
         self,

@@ -42,6 +42,9 @@ Resources:
         SSEEnabled: true
         SSEType: KMS
         KMSMasterKeyId: alias/aws/dynamodb
+      TimeToLiveSpecification:
+        AttributeName: ttl_epoch
+        Enabled: true
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
         RecoveryPeriodInDays: 35

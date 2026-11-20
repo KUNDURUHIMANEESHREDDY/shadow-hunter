@@ -90,3 +90,33 @@ audience, claims, exchange behavior, and expiry contract must be independently
 confirmed before connecting a remote proxy; unknown token formats fail closed.
 The SDK host allowlist and TLS boundary must be configured before any public
 hostname is enabled.
+
+
+## Autonomous Red/Blue runtime threats
+
+- Red strategy output and all proposal fields remain attacker-controlled data.
+- Blue's heuristic risk score and recommendation are advisory only. The deterministic
+  PolicyEngine and existing tool handlers remain the sole authorization authority.
+- Per-agent HMAC secrets must be unique, at least 32 bytes, provisioned outside source
+  control, and protected as application secrets. Compromise of a sender's key allows
+  message forgery as that sender until rotation.
+- Message signatures cover the protocol version, message identifiers, trace, sender,
+  recipient, message type, payload, key ID, issue time, and nonce.
+- The receiver enforces the configured sender-to-key mapping, a bounded timestamp
+  window, constant-time signature comparison, and a persistent single-use nonce.
+- A2A nonces are stored in the primary SQLite or DynamoDB store so replay detection
+  is shared across workers. They are protocol metadata, not authorization grants.
+- The current operator evaluation endpoint uses a disposable SQLite database seeded
+  only with synthetic test principals and orders. Only non-sensitive case outcomes,
+  aggregate metrics, and allowlisted A2A/policy trace metadata are copied to the
+  primary audit table. Raw message payloads, signatures, tokens, and HMAC secrets are
+  excluded. It never runs Red/Blue proposals against live customer orders.
+- HMAC authentication does not encrypt message contents and does not establish a
+  secure remote network channel. Do not expose remote agents until TLS/mTLS or
+  platform workload identity, transport-level limits, and service authorization
+  are deployed and independently verified.
+- Attack-success metrics describe whether a malicious proposal received ALLOW at the
+  policy boundary. They do not mean a refund was executed: refund execution remains
+  behind a separate operator approval capability.
+- Risk scores are deterministic heuristic indicators, not calibrated probabilities
+  or proof of prompt-injection detection accuracy.
