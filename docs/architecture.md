@@ -83,3 +83,28 @@ JWT signing keys are loaded from the HTTPS user-pool JWKS endpoint. Only RS256 i
 SQLite is a local/demo adapter. The local execution endpoint modifies only the demo ledger. It does not call a payment gateway, bank, or external refund provider. The production store, Lambda/API Gateway packaging, Cognito authorizer, CloudWatch retention/alarms, KMS, and infrastructure-as-code deployment remain unimplemented.
 
 Do not deploy, create paid AWS resources, or modify credentials without explicit owner approval.
+
+
+## Local Red/Blue agent exchange
+
+The repository now includes a deterministic, in-process Red/Blue evaluation harness in
+src/shadow_hunter/agents.py.
+
+- The Red Agent emits a versioned, bounded JSON attack proposal with message, trace,
+  sender, recipient, scenario, and proposed tool-action identifiers.
+- The Blue Agent accepts only the configured Red-to-Blue message shape. It treats the
+  description and arguments as untrusted data and submits the proposed action to the
+  existing ToolGateway; the gateway assigns the Blue Agent identity server-side.
+- The Blue Agent returns only the policy decision, reason code, scenario identifier,
+  and action digest. It never returns order data, refund details, approval capabilities,
+  or raw tool output to the Red Agent.
+- The local scenario factory covers cross-customer reads, direct refund-execution
+  attempts, prompt-injected over-limit requests, and extra policy-override arguments.
+- The simulator correlates A2A send/receive/evaluation events with the gateway policy
+  decision under one trace identifier.
+
+This is an executable application-layer prototype, not a remote A2A transport,
+cryptographically authenticated agent identity system, or autonomous LLM Red/Blue
+pair. A production transport must authenticate each agent independently (for example,
+with mutually authenticated service identity), enforce replay and rate limits, and
+preserve the same gateway boundary. No AWS integration or deployment is implied.

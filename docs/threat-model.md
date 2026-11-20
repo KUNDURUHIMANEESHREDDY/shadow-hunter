@@ -52,3 +52,17 @@
 ## Test principle
 
 For each threat, create at least one positive test and one adversarial test. The security test must attempt the action at the tool boundary, not only observe whether the model verbally refuses. Any successful unauthorized side effect is a release blocker.
+
+
+## Agent-to-agent proposal threats
+
+The first Red/Blue slice is an in-process evaluation harness. Red Agent messages remain
+untrusted proposals and cannot supply or override the authenticated customer principal,
+the Blue Agent identity, the policy bundle, or the gateway tool allowlist. The Blue
+Agent validates the message envelope and submits every proposed tool action to the
+same deterministic gateway used by the support workload. Only a redacted decision
+summary is returned to Red; tool output and approval capabilities are not forwarded.
+
+The current in-process envelope is not proof of remote sender authentication. Do not
+expose it over a network until the transport binds sender identity to an authenticated
+workload identity and adds replay protection, request limits, and per-agent rate limits.

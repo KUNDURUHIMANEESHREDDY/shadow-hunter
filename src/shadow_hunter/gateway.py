@@ -44,6 +44,7 @@ class ToolGateway:
         arguments: dict[str, Any],
         request_id: str | None = None,
         trace_id: str | None = None,
+        agent_id: str = "bedrock-refund-assistant",
     ) -> dict[str, Any]:
         metadata_valid = all(
             isinstance(value, str)
@@ -51,6 +52,10 @@ class ToolGateway:
             and value.strip() == value
             for value in (request_id, trace_id)
             if value is not None
+        ) and (
+            isinstance(agent_id, str)
+            and 1 <= len(agent_id) <= 128
+            and agent_id.strip() == agent_id
         )
         request_id = request_id if isinstance(request_id, str) and request_id else str(uuid4())
         trace_id = trace_id if isinstance(trace_id, str) and trace_id else str(uuid4())
@@ -58,6 +63,7 @@ class ToolGateway:
             self._audit_denial(
                 principal, str(tool_name)[:100], request_id, trace_id,
                 "INVALID_INVOCATION_METADATA",
+                agent_id=agent_id,
             )
             return {
                 "decision": Decision.DENY.value,
@@ -68,7 +74,8 @@ class ToolGateway:
 
         if not isinstance(tool_name, str) or tool_name not in self.AGENT_TOOLS:
             self._audit_denial(
-                principal, tool_name, request_id, trace_id, "UNKNOWN_OR_FORBIDDEN_TOOL"
+                principal, tool_name, request_id, trace_id, "UNKNOWN_OR_FORBIDDEN_TOOL",
+                agent_id=agent_id,
             )
             return {
                 "decision": Decision.DENY.value,
@@ -79,7 +86,8 @@ class ToolGateway:
 
         if not isinstance(arguments, dict):
             self._audit_denial(
-                principal, tool_name, request_id, trace_id, "INVALID_ARGUMENTS"
+                principal, tool_name, request_id, trace_id, "INVALID_ARGUMENTS",
+                agent_id=agent_id,
             )
             return {
                 "decision": Decision.DENY.value,
@@ -93,7 +101,7 @@ class ToolGateway:
         invocation = ToolInvocation(
             request_id=request_id,
             trace_id=trace_id,
-            agent_id="bedrock-refund-assistant",
+            agent_id=agent_id,
             tool_name=tool_name,
             arguments=arguments,
         )
@@ -110,7 +118,7 @@ class ToolGateway:
             action_digest=result.action_digest,
             policy_id=result.policy_id,
             policy_version=result.policy_version,
-            details={"tool_name": tool_name},
+            details={"tool_name": tool_name, "agent_id": agent_id},
         )
 
         if result.decision is Decision.DENY:
@@ -159,7 +167,8 @@ class ToolGateway:
             )
         except IdempotencyConflict:
             self._audit_denial(
-                principal, tool_name, request_id, trace_id, "IDEMPOTENCY_KEY_CONFLICT"
+                principal, tool_name, request_id, trace_id, "IDEMPOTENCY_KEY_CONFLICT",
+                agent_id=agent_id,
             )
             return {
                 "decision": Decision.DENY.value,
@@ -223,6 +232,8 @@ class ToolGateway:
         request_id: str,
         trace_id: str,
         reason_code: str,
+        *,
+        agent_id: object = "bedrock-refund-assistant",
     ) -> None:
         self.store.append_audit(
             event_type="POLICY_DECISION",
@@ -232,7 +243,10 @@ class ToolGateway:
             reason_code=reason_code,
             actor_id=principal.subject_id,
             tenant_id=principal.tenant_id,
-            details={"tool_name": str(tool_name)[:100]},
+            details={
+                "tool_name": str(tool_name)[:100],
+                "agent_id": str(agent_id)[:100],
+            },
         )
 
     @staticmethod

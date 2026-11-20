@@ -171,8 +171,9 @@ ChatGPT task automations currently support daily, weekly, and monthly recurring 
 | Approval engine | ADDED — UNTESTED | Parameter/action-digest-bound, expiring, one-time approval capability; token hash stored, raw token returned once |
 | Refund execution | LOCAL DEMO LEDGER ONLY — UNTESTED | Operator-only execution checks approval, expiry, token, stored digest, order state and remaining balance; retry is idempotent |
 | Audit engine | SQLITE EVENT LOG + TRACE QUERY ADDED — UNTESTED | Original request/trace IDs persist through approval and execution events; operators can query the complete trace |
+| Red/Blue agent exchange | IN-PROCESS A2A PROTOTYPE ADDED — UNTESTED | src/shadow_hunter/agents.py defines versioned Red proposals, Blue gateway mediation, redacted responses, four deterministic attack scenarios and correlated audit events; no remote transport or autonomous model pair yet |
 | Production AWS data plane | NOT IMPLEMENTED | Replace SQLite and local bearer-token mapping with AWS-managed persistence and verified identity before deployment |
-| Adversarial benchmark | TESTS AUTHORED — NOT EXECUTED | Policy, gateway, auth, idempotency and approval paths have behavior-focused tests; formal scoring harness remains |
+| Adversarial benchmark | RED/BLUE SCENARIOS AUTHORED — NOT EXECUTED | Four policy-bound attack cases cover cross-customer reads, direct execution, prompt-injected over-refunds and policy-override arguments; broader baseline/protected scoring remains |
 | GitHub Actions workflow | REMOVED | No unattended runner workflow remains in the repository |
 | Self-hosted runner | REMOVED FROM DESIGN | No runner is used for assistant-led interactive coding |
 | Assistant-led coding | INTERACTIVE ONLY | Work is performed in the active ChatGPT session; no reusable ChatGPT session endpoint or background execution is available |
