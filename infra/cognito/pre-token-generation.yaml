@@ -1,0 +1,35 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Shadow Hunter Cognito pre-token-generation claim customizer.
+
+Parameters:
+  UserPoolId:
+    Type: String
+    Description: Existing Cognito user pool ID that will invoke this function.
+
+Resources:
+  ShadowHunterPreTokenGeneration:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: shadow-hunter-cognito-pre-token
+      Runtime: python3.12
+      Handler: cognito_pretoken.handler
+      CodeUri: ../../src/shadow_hunter/
+      MemorySize: 128
+      Timeout: 5
+      Policies:
+        - AWSLambdaBasicExecutionRole
+      Description: Adds trusted tenant/customer claims to Cognito access tokens.
+
+  AllowCognitoUserPoolInvoke:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt ShadowHunterPreTokenGeneration.Arn
+      Principal: cognito-idp.amazonaws.com
+      SourceArn: !Sub "arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}"
+
+Outputs:
+  PreTokenGenerationLambdaArn:
+    Description: Attach this Lambda as the Cognito PreTokenGeneration trigger.
+    Value: !GetAtt ShadowHunterPreTokenGeneration.Arn
