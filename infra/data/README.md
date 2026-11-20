@@ -237,8 +237,9 @@ Run it with the dedicated auditor role:
     shadow-hunter-audit-verify --table-name shadow-hunter-production --bucket <archive-bucket> --prefix audit-events --region <region> --trace-id <trace-id> --report-file audit-verification.json
 
 Omit `--trace-id` to verify every visible audit row. The role requires only
-`dynamodb:Query` on the AUDIT GSI and `s3:GetObject` on
-`audit-events/*`, as shown in `audit-verification-policy.example.json`.
+`dynamodb:Query` on the table ARN and AUDIT GSI ARN plus `s3:GetObject` on
+`audit-events/*`. With `--trace-id`, it queries only the base-table
+`TRACE#<trace-id>` partition; a full verification queries the AUDIT GSI, as shown in `audit-verification-policy.example.json`.
 It does not enumerate S3 keys or detect orphan objects; run
 `shadow-hunter-audit-reconcile` separately for missing/orphan key comparison.
 Because GSI1 is eventually consistent, run after the exporter catches up and

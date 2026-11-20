@@ -11,9 +11,11 @@ class FakeTable:
     def __init__(self, items):
         self.items = items
         self.calls = 0
+        self.last_query = None
 
     def query(self, **kwargs):
         self.calls += 1
+        self.last_query = kwargs
         return {"Items": self.items}
 
 
@@ -106,8 +108,9 @@ def test_verifier_reports_missing_archive_object():
 def test_verifier_can_limit_check_to_a_single_trace():
     selected = audit_item(trace_id="trace-selected")
     key = _object_key(selected["created_at"], selected["event_id"])
+    table = FakeTable([selected])
     report = verify_audit_archive(
-        FakeTable([selected]),
+        table,
         FakeS3({key: canonical_body(selected)}),
         bucket="audit-bucket",
         trace_id="trace-selected",
@@ -115,6 +118,9 @@ def test_verifier_can_limit_check_to_a_single_trace():
     assert report["ok"] is True
     assert report["source_audit_events_checked"] == 1
     assert report["no_matching_trace"] is False
+    assert "IndexName" not in table.last_query
+    assert table.last_query["ExpressionAttributeNames"]["#pk"] == "PK"
+    assert table.last_query["ExpressionAttributeValues"][":trace_partition"] == "TRACE#trace-selected"
 
 
 def test_verifier_fails_when_trace_has_no_matching_rows():

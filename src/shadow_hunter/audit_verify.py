@@ -71,17 +71,30 @@ def verify_audit_archive(
         raise ValueError("trace_id must contain 1–128 trimmed characters")
 
     fields = ("entity_type", *_ALLOWED_FIELDS)
-    aliases = {"#gsi1pk": "GSI1PK"}
-    aliases.update({f"#{field}": field for field in fields})
+    aliases = {f"#{field}": field for field in fields}
     projection = ", ".join(f"#{field}" for field in fields)
-    query: dict[str, Any] = {
-        "IndexName": "GSI1",
-        "KeyConditionExpression": "#gsi1pk = :audit_partition",
-        "ProjectionExpression": projection,
-        "ExpressionAttributeNames": aliases,
-        "ExpressionAttributeValues": {":audit_partition": "AUDIT"},
-        "Limit": page_size,
-    }
+    if trace_id is not None:
+        # Audit rows for one trace share the base-table TRACE# partition, so
+        # targeted verification avoids reading the entire global AUDIT GSI.
+        aliases["#pk"] = "PK"
+        query: dict[str, Any] = {
+            "KeyConditionExpression": "#pk = :trace_partition",
+            "ProjectionExpression": projection,
+            "ExpressionAttributeNames": aliases,
+            "ExpressionAttributeValues": {":trace_partition": f"TRACE#{trace_id}"},
+            "Limit": page_size,
+        }
+    else:
+        # A full archive check must use the dedicated GSI1 AUDIT partition.
+        aliases["#gsi1pk"] = "GSI1PK"
+        query = {
+            "IndexName": "GSI1",
+            "KeyConditionExpression": "#gsi1pk = :audit_partition",
+            "ProjectionExpression": projection,
+            "ExpressionAttributeNames": aliases,
+            "ExpressionAttributeValues": {":audit_partition": "AUDIT"},
+            "Limit": page_size,
+        }
 
     checked = 0
     verified = 0
