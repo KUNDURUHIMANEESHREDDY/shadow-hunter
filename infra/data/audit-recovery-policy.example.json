@@ -1,0 +1,49 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadAuditIndexForReconciliation",
+      "Effect": "Allow",
+      "Action": ["dynamodb:Query"],
+      "Resource": "REPLACE_WITH_TABLE_ARN/index/GSI1"
+    },
+    {
+      "Sid": "ReadFailedRangesFromDynamoStreams",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:DescribeStream",
+        "dynamodb:GetShardIterator",
+        "dynamodb:GetRecords"
+      ],
+      "Resource": "REPLACE_WITH_DYNAMODB_STREAM_ARN"
+    },
+    {
+      "Sid": "InspectArchiveKeys",
+      "Effect": "Allow",
+      "Action": ["s3:ListBucket"],
+      "Resource": "REPLACE_WITH_AUDIT_BUCKET_ARN",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": ["audit-events", "audit-events/*"]
+        }
+      }
+    },
+    {
+      "Sid": "ReplayOnlyToAuditArchivePrefix",
+      "Effect": "Allow",
+      "Action": ["s3:PutObject"],
+      "Resource": "REPLACE_WITH_AUDIT_BUCKET_ARN/audit-events/*"
+    },
+    {
+      "Sid": "ReadAndAcknowledgeOnlyAuditExportDlq",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:ChangeMessageVisibility",
+        "sqs:GetQueueAttributes"
+      ],
+      "Resource": "REPLACE_WITH_AUDIT_EXPORT_DLQ_ARN"
+    }
+  ]
+}

@@ -100,6 +100,78 @@ errors, periodically reconcile DynamoDB audit counts against the S3 archive,
 and record manual recovery. A separate account/role should own archive read
 access and retention changes.
 
+## Reconciliation and DLQ recovery
+
+The repository includes two operator-run commands. Both require a read-only
+inspection role for reconciliation. Replay additionally requires the
+narrowly-scoped SQS, DynamoDB Streams, and conditional S3 write permissions
+in audit-recovery-policy.example.json.
+
+### Compare DynamoDB audit identities with S3 archive keys
+
+Install the AWS extra and run:
+
+    python -m shadow_hunter.audit_reconcile --table-name shadow-hunter-production --bucket <archive-bucket> --prefix audit-events --region <region> --report-file audit-reconciliation.json
+
+The command queries only event_id and created_at from GSI1's AUDIT partition
+and lists JSON object keys under the configured S3 prefix. It does not read
+archive object bodies. The report contains counts and bounded key samples,
+not audit payloads. It detects missing archive keys, unexpected JSON keys,
+invalid DynamoDB audit identities, and duplicate event IDs.
+
+GSI1 is eventually consistent. Wait for the stream exporter to catch up, run
+the reconciliation command, and repeat it before treating a mismatch as
+permanent. This is key-level reconciliation, not a content hash or a proof
+that an existing archive object's body is correct.
+
+### Inspect and replay failed batches
+
+The SQS on-failure destination for a DynamoDB Streams event source mapping
+contains invocation metadata and the failed shard/sequence range; unlike an
+S3 on-failure destination, it does not include the original stream event
+payload. The replay command uses that metadata to fetch the original records
+from DynamoDB Streams, while they remain inside the stream's 24-hour retention
+window.
+
+First inspect a bounded number of messages without writing or deleting:
+
+    python -m shadow_hunter.audit_replay --queue-url <dlq-url> --bucket <archive-bucket> --prefix audit-events --region <region> --max-messages 5
+
+The dry run temporarily receives messages, validates their sequence ranges,
+fetches the records, then makes the messages visible again. It does not write
+to S3 and does not delete DLQ messages.
+
+After reviewing the output and obtaining the required operational approval,
+replay explicitly:
+
+    python -m shadow_hunter.audit_replay --queue-url <dlq-url> --bucket <archive-bucket> --prefix audit-events --region <region> --max-messages 5 --apply
+
+The replay command uses the same conditional If-None-Match write as the stream
+exporter. Existing objects are treated as successful idempotent replays. A DLQ
+message is deleted only after every record in its original range has been
+processed successfully. If any record is unavailable or any write fails,
+the message remains in the queue for investigation/retry.
+
+DynamoDB Streams records expire after 24 hours. A DLQ message retained for
+14 days does not preserve the original records: once the stream range has
+expired, this command cannot reconstruct it. Such gaps require a separate
+recovery source (for example, a verified backup or an upstream audit copy);
+do not claim that DLQ retention alone guarantees recovery.
+
+### Recovery IAM boundary
+
+The example policy grants:
+- Query on only the table's GSI1 AUDIT index.
+- DescribeStream, GetShardIterator, and GetRecords on the selected table stream.
+- ListBucket only for the audit-events prefix.
+- PutObject only under audit-events/.
+- ReceiveMessage, DeleteMessage, ChangeMessageVisibility, and GetQueueAttributes
+  only on the audit-export DLQ.
+
+It does not grant S3 GetObject, DeleteObject, retention changes, DynamoDB
+Scan, table administration, or application write access. Keep this recovery
+identity separate from the exporter role and the application runtime role.
+
 ## Provisioning
 
 Review the template and estimated on-demand usage/cost before deploying:

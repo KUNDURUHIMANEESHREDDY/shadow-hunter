@@ -18,6 +18,8 @@ aws = ["boto3>=1.44", "mangum>=0.22.0"]
 
 [project.scripts]
 shadow-hunter-api = "shadow_hunter.api:run"
+shadow-hunter-audit-reconcile = "shadow_hunter.audit_reconcile:main"
+shadow-hunter-audit-replay = "shadow_hunter.audit_replay:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
