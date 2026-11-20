@@ -1,0 +1,5 @@
+fastapi>=0.115,<1
+PyJWT[crypto]>=2.10,<3
+boto3>=1.44,<2
+mcp>=2.2.0,<3
+mangum==0.22.0

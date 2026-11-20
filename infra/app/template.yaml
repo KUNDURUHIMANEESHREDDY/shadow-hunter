@@ -1,0 +1,195 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Shadow Hunter FastAPI Lambda and route-authorized API Gateway HTTP API.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues: [development, staging, production]
+  DynamoDBTableName:
+    Type: String
+    Description: TableName output from infra/data/dynamodb.yaml.
+  DynamoDBTableArn:
+    Type: String
+    Description: TableArn output from infra/data/dynamodb.yaml.
+  CognitoIssuer:
+    Type: String
+    Description: Exact Cognito user-pool issuer URL.
+  CognitoCustomerClientId:
+    Type: String
+    Description: Cognito customer app-client ID. Customer token must not be resource-bound to a different audience.
+  CognitoOperatorClientId:
+    Type: String
+    Description: Separate Cognito app-client ID for operator access.
+  CognitoToolAudience:
+    Type: String
+    Description: Resource-server audience in the delegated OBO access token.
+  CognitoCustomerScope:
+    Type: String
+    Default: shadow-hunter/customer
+  CognitoToolScope:
+    Type: String
+    Default: shadow-hunter-api/refunds
+  CognitoActorSubject:
+    Type: String
+    Description: Exact act.sub identity expected for the delegated agent.
+  CognitoOperatorGroup:
+    Type: String
+    Default: shadow_hunter_operators
+  RefundLimitMinor:
+    Type: Number
+    MinValue: 1
+    Description: Self-service limit in configured currency minor units.
+  ApprovalTtlSeconds:
+    Type: Number
+    Default: 600
+    MinValue: 30
+    MaxValue: 86400
+  HarnessArn:
+    Type: String
+    Default: ''
+    Description: Optional deployed AgentCore Harness ARN.
+
+Resources:
+  ShadowHunterLambdaLogs:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/shadow-hunter-api-${Environment}'
+      RetentionInDays: 30
+
+  ShadowHunterHttpApiLogs:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    Properties:
+      LogGroupName: !Sub '/aws/apigateway/shadow-hunter-${Environment}'
+      RetentionInDays: 30
+
+  ShadowHunterHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: prod
+      Description: Shadow Hunter customer, agent-tool, and operator API.
+      AccessLogSettings:
+        DestinationArn: !GetAtt ShadowHunterHttpApiLogs.Arn
+        Format: '{"requestId":"$context.requestId","sourceIp":"$context.identity.sourceIp","routeKey":"$context.routeKey","status":"$context.status"}'
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 40
+        ThrottlingRateLimit: 20
+      Auth:
+        Authorizers:
+          CustomerJwt:
+            IdentitySource: '$request.header.Authorization'
+            JwtConfiguration:
+              issuer: !Ref CognitoIssuer
+              audience:
+                - !Ref CognitoCustomerClientId
+          GatewayJwt:
+            IdentitySource: '$request.header.Authorization'
+            JwtConfiguration:
+              issuer: !Ref CognitoIssuer
+              audience:
+                - !Ref CognitoToolAudience
+          OperatorJwt:
+            IdentitySource: '$request.header.Authorization'
+            JwtConfiguration:
+              issuer: !Ref CognitoIssuer
+              audience:
+                - !Ref CognitoOperatorClientId
+
+  ShadowHunterApiFunction:
+    Type: AWS::Serverless::Function
+    DependsOn:
+      - ShadowHunterLambdaLogs
+    Properties:
+      FunctionName: !Sub 'shadow-hunter-api-${Environment}'
+      CodeUri: ../../src/
+      Handler: shadow_hunter.lambda_handler.handler
+      Runtime: python3.12
+      Architectures:
+        - x86_64
+      MemorySize: 1024
+      Timeout: 28
+      ReservedConcurrentExecutions: 10
+      Environment:
+        Variables:
+          SHADOW_HUNTER_AUTH_MODE: cognito
+          SHADOW_HUNTER_STORE_BACKEND: dynamodb
+          SHADOW_HUNTER_DYNAMODB_TABLE: !Ref DynamoDBTableName
+          SHADOW_HUNTER_COGNITO_ISSUER: !Ref CognitoIssuer
+          SHADOW_HUNTER_COGNITO_CUSTOMER_CLIENT_ID: !Ref CognitoCustomerClientId
+          SHADOW_HUNTER_COGNITO_CUSTOMER_SCOPE: !Ref CognitoCustomerScope
+          SHADOW_HUNTER_COGNITO_TOOL_AUDIENCE: !Ref CognitoToolAudience
+          SHADOW_HUNTER_COGNITO_TOOL_SCOPE: !Ref CognitoToolScope
+          SHADOW_HUNTER_COGNITO_ACTOR_SUB: !Ref CognitoActorSubject
+          SHADOW_HUNTER_COGNITO_OPERATOR_CLIENT_ID: !Ref CognitoOperatorClientId
+          SHADOW_HUNTER_COGNITO_OPERATOR_GROUP: !Ref CognitoOperatorGroup
+          SHADOW_HUNTER_REFUND_LIMIT_MINOR: !Sub '${RefundLimitMinor}'
+          SHADOW_HUNTER_APPROVAL_TTL_SECONDS: !Sub '${ApprovalTtlSeconds}'
+          SHADOW_HUNTER_HARNESS_ARN: !Ref HarnessArn
+          SHADOW_HUNTER_DEMO_MODE: 'false'
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: '2012-10-17'
+          Statement:
+            - Sid: ShadowHunterDynamoDataAccess
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+                - dynamodb:TransactWriteItems
+              Resource:
+                - !Ref DynamoDBTableArn
+                - !Sub '${DynamoDBTableArn}/index/GSI1'
+      Events:
+        Health:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ShadowHunterHttpApi
+            Path: /health
+            Method: GET
+        OperatorConsole:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ShadowHunterHttpApi
+            Path: /operator
+            Method: GET
+        CustomerChat:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ShadowHunterHttpApi
+            Path: /v1/agent/chat
+            Method: POST
+            Auth:
+              Authorizer: CustomerJwt
+              AuthorizationScopes:
+                - !Ref CognitoCustomerScope
+        GatewayTools:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ShadowHunterHttpApi
+            Path: /v1/agent/tools/{tool_name}
+            Method: POST
+            Auth:
+              Authorizer: GatewayJwt
+              AuthorizationScopes:
+                - !Ref CognitoToolScope
+        OperatorApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ShadowHunterHttpApi
+            Path: /v1/operator/{proxy+}
+            Method: ANY
+            Auth:
+              Authorizer: OperatorJwt
+
+Outputs:
+  ApiBaseUrl:
+    Description: Base URL for the Shadow Hunter HTTP API.
+    Value: !Sub 'https://${ShadowHunterHttpApi}.execute-api.${AWS::Region}.amazonaws.com/prod'
+  ApiFunctionArn:
+    Description: Lambda function ARN.
+    Value: !GetAtt ShadowHunterApiFunction.Arn

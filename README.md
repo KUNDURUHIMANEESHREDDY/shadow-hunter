@@ -172,10 +172,11 @@ ChatGPT task automations currently support daily, weekly, and monthly recurring 
 | Refund execution | LOCAL DEMO LEDGER ONLY — UNTESTED | Operator-only execution checks approval, expiry, token, stored digest, order state and remaining balance; retry is idempotent |
 | Audit engine | SQLITE EVENT LOG + TRACE QUERY ADDED — UNTESTED | Original request/trace IDs persist through approval and execution events; operators can query the complete trace |
 | Red/Blue agent exchange | IN-PROCESS A2A PROTOTYPE ADDED — UNTESTED | src/shadow_hunter/agents.py defines versioned Red proposals, Blue gateway mediation, redacted responses, four deterministic attack scenarios and correlated audit events; no remote transport or autonomous model pair yet |
-| MCP server | ADDED — UNTESTED / LOCALHOST-ONLY | Official MCP SDK Streamable HTTP endpoint at /mcp/; exposes the three existing agent tools through ToolGateway and reuses the current gateway-token authenticator |
+| MCP server | ADDED — UNTESTED / LOCALHOST-ONLY | Official MCP SDK Streamable HTTP endpoint at /mcp/; public Lambda/API template intentionally omits it until host allowlist and proxy security are complete. |
 | AgntID runtime connection | NOT CONFIGURED | Upstream MCP endpoint exists, but AgntID agent registration, proxy configuration, and upstream credential compatibility have not been verified |
 | AWS persistence | DYNAMODB ADAPTER + TABLE TEMPLATE ADDED — UNTESTED / NOT DEPLOYED | Transactional adapter preserves the SQLiteStore contract; table template uses GSI1, on-demand capacity, KMS encryption and 35-day PITR. |
-| Production AWS data plane | NOT IMPLEMENTED | API service deployment, Cognito/AgentCore resources, runtime IAM wiring, operational alarms and audit export remain. |
+| Lambda/API deployment | SAM TEMPLATE + ROUTE JWT AUTHORIZERS ADDED — UNTESTED / NOT DEPLOYED | FastAPI/Mangum Lambda, explicit customer/OBO/operator routes, and DynamoDB-only runtime IAM template. |
+| Production AWS data plane | NOT DEPLOYED | Cognito, AgentCore, DynamoDB and application stacks still require approved account-specific deployment and end-to-end verification. |
 | Adversarial benchmark | RED/BLUE SCENARIOS AUTHORED — NOT EXECUTED | Four policy-bound attack cases cover cross-customer reads, direct execution, prompt-injected over-refunds and policy-override arguments; broader baseline/protected scoring remains |
 | GitHub Actions workflow | REMOVED | No unattended runner workflow remains in the repository |
 | Self-hosted runner | REMOVED FROM DESIGN | No runner is used for assistant-led interactive coding |
@@ -212,7 +213,7 @@ For Cognito mode set `SHADOW_HUNTER_AUTH_MODE=cognito` and the variables documen
 
 Set `SHADOW_HUNTER_STORE_BACKEND=sqlite` for local demos. For AWS persistence, set `SHADOW_HUNTER_STORE_BACKEND=dynamodb`, `SHADOW_HUNTER_DYNAMODB_TABLE` to the deployed table name, and `AWS_REGION`. The DynamoDB table template and least-privilege policy example are under `infra/data/`. Set `SHADOW_HUNTER_DB_PATH` only for SQLite mode. `SHADOW_HUNTER_REFUND_LIMIT_MINOR` controls the self-service threshold and `SHADOW_HUNTER_APPROVAL_TTL_SECONDS` controls approval expiry. Set `SHADOW_HUNTER_HARNESS_ARN` and `AWS_REGION` to enable the AgentCore Harness chat route. Set `SHADOW_HUNTER_DEMO_MODE=true` to enable the operator-only demo order seed route. Local refund execution updates a demo ledger only; it does not call a payment provider.
 
-No commands, tests, builds, lint, or security checks have been run during this engineering cycle. No AWS resources have been created or deployed.
+The Lambda entrypoint is src/shadow_hunter/lambda_handler.py; the SAM package is under infra/app/ and uses src/requirements.txt. The deployment template routes customer, delegated tool and operator endpoints through distinct API Gateway JWT authorizers, with FastAPI performing a second token-profile check. The public template intentionally omits the localhost-only MCP route. No SAM build, tests, lint, CloudFormation validation, or AWS deployment has been run. No AWS resources have been created or deployed.
 
 ## Cost and automation policy
 

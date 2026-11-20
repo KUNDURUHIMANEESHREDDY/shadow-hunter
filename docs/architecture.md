@@ -87,9 +87,17 @@ Refund request creation, approval creation, approval/rejection transitions, and 
 
 The table template is infra/data/dynamodb.yaml. It configures on-demand billing, GSI1, AWS-managed KMS encryption, 35-day point-in-time recovery, production deletion protection, and Retain policies. The global stats counter is a potential write hot key at higher throughput and should be sharded or asynchronously aggregated before scaling. The adapter remains untested and undeployed. DynamoDB audit rows are append-oriented but not WORM/tamper-evident.
 
+## Lambda and HTTP API deployment
+
+The FastAPI application has a lazy Lambda entrypoint at src/shadow_hunter/lambda_handler.py using Mangum. infra/app/template.yaml defines an HTTP API with separate Cognito JWT authorizers for customer chat, Gateway OBO tool calls, and operator routes. The Lambda repeats its own JWT profile verification and has only DynamoDB data-plane permissions for the configured table and GSI1. It has no infrastructure-administration permissions. The SAM package is untested and has not been deployed.
+
+The application also mounts an AgntID-facing MCP Streamable HTTP endpoint, but the SAM template does not expose /mcp/. Its Host/Origin protection remains localhost-only, and a public host allowlist plus a separate TLS/proxy boundary must be completed before making it reachable from the internet.
+
+The Lambda adapter disables ASGI lifespan because the public REST routes do not require the MCP session manager. The synchronous Harness chat path is bounded by a 28-second Lambda timeout; long-running/streaming agent sessions require a separate asynchronous or streaming design.
+
 ## Data and deployment status
 
-SQLite remains the default local/demo adapter. Set SHADOW_HUNTER_STORE_BACKEND=dynamodb with SHADOW_HUNTER_DYNAMODB_TABLE and AWS_REGION to select the new AWS adapter. The single-table template uses an on-demand GSI1, KMS encryption, 35-day point-in-time recovery, production deletion protection, and Retain policies. The runtime adapter requires least-privilege GetItem, PutItem, UpdateItem, Query, and TransactWriteItems permissions. The adapter and table template are untested and undeployed. The API service deployment, Cognito user pool, AgentCore resources, CloudWatch operational alarms, and separate WORM/tamper-evident audit export remain unimplemented. The DynamoDB refund path still only updates a demo ledger; it does not call an external payment provider.
+SQLite remains the default local/demo adapter. Set SHADOW_HUNTER_STORE_BACKEND=dynamodb with SHADOW_HUNTER_DYNAMODB_TABLE and AWS_REGION to select the new AWS adapter. The single-table template uses an on-demand GSI1, KMS encryption, 35-day point-in-time recovery, production deletion protection, and Retain policies. The runtime adapter requires least-privilege GetItem, PutItem, UpdateItem, Query, and TransactWriteItems permissions. The adapter and table template are untested and undeployed. A SAM application template now describes the FastAPI Lambda and API Gateway HTTP API deployment, with route-specific customer, OBO-tool, and operator JWT authorizers plus a DynamoDB-only runtime IAM policy. The SAM package is authored but untested and undeployed. The Cognito user pool, AgentCore resources, CloudWatch alarms beyond basic log retention, and separate WORM/tamper-evident audit export still require account-specific provisioning and validation. The DynamoDB refund path still only updates a demo ledger; it does not call an external payment provider.
 
 Do not deploy, create paid AWS resources, or modify credentials without explicit owner approval.
 
