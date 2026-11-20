@@ -35,12 +35,23 @@ def _bearer(authorization: str | None) -> str | None:
 
 def create_app(
     *,
-    store: SQLiteStore | None = None,
+    store: Any | None = None,
     authenticator: Any | None = None,
     harness_client: AgentCoreHarnessClient | None = None,
 ) -> FastAPI:
-    database_path = os.environ.get("SHADOW_HUNTER_DB_PATH", "shadow_hunter.sqlite3")
-    store = store or SQLiteStore(database_path)
+    if store is None:
+        backend = os.environ.get("SHADOW_HUNTER_STORE_BACKEND", "sqlite").strip().lower()
+        if backend == "sqlite":
+            database_path = os.environ.get("SHADOW_HUNTER_DB_PATH", "shadow_hunter.sqlite3")
+            store = SQLiteStore(database_path)
+        elif backend == "dynamodb":
+            from .dynamodb_store import DynamoDBStore
+
+            store = DynamoDBStore.from_environment()
+        else:
+            raise StoreError(
+                "SHADOW_HUNTER_STORE_BACKEND must be either 'sqlite' or 'dynamodb'"
+            )
     authenticator = authenticator or build_authenticator_from_environment()
     approval_ttl = int(os.environ.get("SHADOW_HUNTER_APPROVAL_TTL_SECONDS", "600"))
     refund_limit = int(os.environ.get("SHADOW_HUNTER_REFUND_LIMIT_MINOR", "10000"))

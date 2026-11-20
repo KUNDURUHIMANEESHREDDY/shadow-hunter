@@ -84,7 +84,7 @@ flowchart TD
 | Business tools | Governed FastAPI tool API in the local slice; deploy behind API Gateway/Lambda for AWS |
 | API | Amazon API Gateway |
 | Identity | Amazon Cognito and least-privilege IAM roles |
-| Operational data | SQLite local/demo adapter; production AWS store not yet implemented |
+| Operational data | SQLite local/demo plus DynamoDB adapter/template (untested, not deployed) |
 | Audit evidence | Structured append-oriented records with a separately protected retention/export path |
 | Frontend | Minimal operator console served by FastAPI; a richer frontend remains optional |
 | Infrastructure | Not yet deployed; AgentCore configuration examples and Cedar/OpenAPI templates are committed |
@@ -172,7 +172,8 @@ ChatGPT task automations currently support daily, weekly, and monthly recurring 
 | Refund execution | LOCAL DEMO LEDGER ONLY — UNTESTED | Operator-only execution checks approval, expiry, token, stored digest, order state and remaining balance; retry is idempotent |
 | Audit engine | SQLITE EVENT LOG + TRACE QUERY ADDED — UNTESTED | Original request/trace IDs persist through approval and execution events; operators can query the complete trace |
 | Red/Blue agent exchange | IN-PROCESS A2A PROTOTYPE ADDED — UNTESTED | src/shadow_hunter/agents.py defines versioned Red proposals, Blue gateway mediation, redacted responses, four deterministic attack scenarios and correlated audit events; no remote transport or autonomous model pair yet |
-| Production AWS data plane | NOT IMPLEMENTED | Replace SQLite and local bearer-token mapping with AWS-managed persistence and verified identity before deployment |
+| AWS persistence | DYNAMODB ADAPTER + TABLE TEMPLATE ADDED — UNTESTED / NOT DEPLOYED | Transactional adapter preserves the SQLiteStore contract; table template uses GSI1, on-demand capacity, KMS encryption and 35-day PITR. |
+| Production AWS data plane | NOT IMPLEMENTED | API service deployment, Cognito/AgentCore resources, runtime IAM wiring, operational alarms and audit export remain. |
 | Adversarial benchmark | RED/BLUE SCENARIOS AUTHORED — NOT EXECUTED | Four policy-bound attack cases cover cross-customer reads, direct execution, prompt-injected over-refunds and policy-override arguments; broader baseline/protected scoring remains |
 | GitHub Actions workflow | REMOVED | No unattended runner workflow remains in the repository |
 | Self-hosted runner | REMOVED FROM DESIGN | No runner is used for assistant-led interactive coding |
@@ -207,7 +208,7 @@ Local demo mode is the default. Configure `SHADOW_HUNTER_CUSTOMER_TOKENS` and `S
 
 For Cognito mode set `SHADOW_HUNTER_AUTH_MODE=cognito` and the variables documented in `infra/agentcore/README.md`. Customer chat uses a Cognito access token; `/v1/agent/tools/{tool_name}` requires a separate OBO token with the configured target audience, scope and actor claim. The application verifies each token against the user-pool JWKS before creating a Principal. Do not expose the API target until the Cognito pre-token-generation claims, scopes, and AgentCore OBO configuration are deployed and verified.
 
-Set `SHADOW_HUNTER_DB_PATH` to choose the SQLite file, `SHADOW_HUNTER_REFUND_LIMIT_MINOR` for the configured self-service threshold, and `SHADOW_HUNTER_APPROVAL_TTL_SECONDS` for approval expiry. Set `SHADOW_HUNTER_HARNESS_ARN` and `AWS_REGION` to enable the AgentCore Harness chat route. Set `SHADOW_HUNTER_DEMO_MODE=true` to enable the operator-only demo order seed route. Local refund execution updates a demo ledger only; it does not call a payment provider.
+Set `SHADOW_HUNTER_STORE_BACKEND=sqlite` for local demos. For AWS persistence, set `SHADOW_HUNTER_STORE_BACKEND=dynamodb`, `SHADOW_HUNTER_DYNAMODB_TABLE` to the deployed table name, and `AWS_REGION`. The DynamoDB table template and least-privilege policy example are under `infra/data/`. Set `SHADOW_HUNTER_DB_PATH` only for SQLite mode. `SHADOW_HUNTER_REFUND_LIMIT_MINOR` controls the self-service threshold and `SHADOW_HUNTER_APPROVAL_TTL_SECONDS` controls approval expiry. Set `SHADOW_HUNTER_HARNESS_ARN` and `AWS_REGION` to enable the AgentCore Harness chat route. Set `SHADOW_HUNTER_DEMO_MODE=true` to enable the operator-only demo order seed route. Local refund execution updates a demo ledger only; it does not call a payment provider.
 
 No commands, tests, builds, lint, or security checks have been run during this engineering cycle. No AWS resources have been created or deployed.
 

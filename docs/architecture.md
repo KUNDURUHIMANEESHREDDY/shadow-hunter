@@ -8,13 +8,14 @@ The current application stack is:
 - Python policy engine and tool gateway
 - FastAPI API boundary
 - SQLite local/demo persistence adapter
+- Transactional single-table DynamoDB adapter for AWS
 - Parameter-bound approval service
-- Local demo ledger execution (no payment provider)
+- Demo ledger execution in either local SQLite or DynamoDB (no payment provider)
 - Append-oriented audit event table
 - Minimal operator console served from the API
 - Optional Amazon Bedrock AgentCore Harness client
 
-This is a local end-to-end implementation slice, not a production AWS deployment.
+The DynamoDB adapter preserves the SQLiteStore method contract and uses conditional TransactWriteItems for refund and approval state changes. It is implemented but untested and not deployed.
 
 ## Trust boundaries
 
@@ -78,9 +79,17 @@ The environment-backed opaque token map remains the local development adapter. S
 
 JWT signing keys are loaded from the HTTPS user-pool JWKS endpoint. Only RS256 is accepted; issuer, expiry, issued-at, subject, token_use, audience where applicable, app client, scopes, and actor claims are validated before a Principal is created. Tenant/customer values are taken from verified claims only. Do not accept identity from user prompts, Harness tool arguments, unverified JWT payloads, or unsigned headers.
 
+## DynamoDB persistence adapter
+
+The optional DynamoDBStore is selected with SHADOW_HUNTER_STORE_BACKEND=dynamodb and preserves the SQLiteStore method contract. It uses a single table with one GSI for the operator audit and approval lists. Refund requests, tenant-scoped idempotency claims, approvals, approval pointers, audit events, and counters use separate partition/sort key namespaces.
+
+Refund request creation, approval creation, approval/rejection transitions, and approved refund execution use conditional TransactWriteItems operations. The execution transaction conditionally decrements the trusted order balance, changes refund and approval state, consumes the approval token hash, writes the correlated audit event, and updates dashboard counters atomically. The public projection explicitly omits approval token hashes.
+
+The table template is infra/data/dynamodb.yaml. It configures on-demand billing, GSI1, AWS-managed KMS encryption, 35-day point-in-time recovery, production deletion protection, and Retain policies. The global stats counter is a potential write hot key at higher throughput and should be sharded or asynchronously aggregated before scaling. The adapter remains untested and undeployed. DynamoDB audit rows are append-oriented but not WORM/tamper-evident.
+
 ## Data and deployment status
 
-SQLite is a local/demo adapter. The local execution endpoint modifies only the demo ledger. It does not call a payment gateway, bank, or external refund provider. The production store, Lambda/API Gateway packaging, Cognito authorizer, CloudWatch retention/alarms, KMS, and infrastructure-as-code deployment remain unimplemented.
+SQLite remains the default local/demo adapter. Set SHADOW_HUNTER_STORE_BACKEND=dynamodb with SHADOW_HUNTER_DYNAMODB_TABLE and AWS_REGION to select the new AWS adapter. The single-table template uses an on-demand GSI1, KMS encryption, 35-day point-in-time recovery, production deletion protection, and Retain policies. The runtime adapter requires least-privilege GetItem, PutItem, UpdateItem, Query, and TransactWriteItems permissions. The adapter and table template are untested and undeployed. The API service deployment, Cognito user pool, AgentCore resources, CloudWatch operational alarms, and separate WORM/tamper-evident audit export remain unimplemented. The DynamoDB refund path still only updates a demo ledger; it does not call an external payment provider.
 
 Do not deploy, create paid AWS resources, or modify credentials without explicit owner approval.
 
