@@ -66,3 +66,27 @@ summary is returned to Red; tool output and approval capabilities are not forwar
 The current in-process envelope is not proof of remote sender authentication. Do not
 expose it over a network until the transport binds sender identity to an authenticated
 workload identity and adds replay protection, request limits, and per-agent rate limits.
+
+
+## MCP and proxy-boundary threats
+
+The Streamable HTTP MCP endpoint is a separate ingress path into the same tool
+gateway. Every HTTP request must carry exactly one accepted Bearer credential.
+Missing, duplicated, malformed, expired, wrong-audience, wrong-scope, wrong-actor,
+JWKS-failure, and verifier-error cases must fail before MCP dispatch. Each tool
+handler must also deny when no authenticated request context exists, such as
+in-memory or non-HTTP invocation.
+
+Caller-supplied MCP clientInfo, prompt text, tool arguments, and transport
+metadata are not authenticated agent identity. The agent attribution is resolved
+from the verified Cognito act.sub configuration, or from a local-only server
+setting. The upstream bearer token must not be copied into tool arguments,
+application logs, database rows, or downstream credentials.
+
+The MCP tool surface must remain an explicit allowlist containing only order
+read, eligibility read, and refund-request creation. Refund execution and all
+operator routes remain outside the MCP server. AgntID's upstream token issuer,
+audience, claims, exchange behavior, and expiry contract must be independently
+confirmed before connecting a remote proxy; unknown token formats fail closed.
+The SDK host allowlist and TLS boundary must be configured before any public
+hostname is enabled.

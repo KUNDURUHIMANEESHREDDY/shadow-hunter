@@ -117,3 +117,25 @@ cryptographically authenticated agent identity system, or autonomous LLM Red/Blu
 pair. A production transport must authenticate each agent independently (for example,
 with mutually authenticated service identity), enforce replay and rate limits, and
 preserve the same gateway boundary. No AWS integration or deployment is implied.
+
+
+## AgntID-facing MCP server
+
+The FastAPI application mounts the official MCP Python SDK Streamable HTTP
+server at /mcp/. It advertises only get_order, check_refund_eligibility, and
+create_refund_request. Each handler delegates to the same ToolGateway used by
+the existing application API; there is no second policy implementation.
+
+An outer ASGI boundary requires exactly one Bearer token on every MCP HTTP
+request and resolves the principal through authenticate_gateway_tool. In
+Cognito mode this preserves the existing delegated-token checks, including
+issuer, RS256 signature, expiry, audience, refund scope, subject, and act.sub.
+The act.sub value is the server-assigned agent ID. Local opaque tokens use a
+server-configured local agent ID and are restricted to local development.
+MCP clientInfo and tool arguments never establish identity.
+
+The operator-only refund execution route is not included in the MCP surface.
+The MCP transport is localhost-only by default. AgntID proxy configuration and
+the challenge-specific credential contract remain unverified; a token that
+does not satisfy the existing verifier is rejected rather than trusted or forwarded.
+See docs/agntid-integration.md.

@@ -12,8 +12,8 @@ license = { file = "LICENSE" }
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "PyJWT[crypto]>=2.10"]
-server = ["fastapi>=0.115", "uvicorn[standard]>=0.30", "PyJWT[crypto]>=2.10"]
+dev = ["pytest>=8.0", "PyJWT[crypto]>=2.10", "mcp>=2.2.0,<3"]
+server = ["fastapi>=0.115", "uvicorn[standard]>=0.30", "PyJWT[crypto]>=2.10", "mcp>=2.2.0,<3"]
 aws = ["boto3>=1.44"]
 
 [project.scripts]

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -17,6 +18,7 @@ from .agentcore import (
 from .approvals import ApprovalService
 from .auth import build_authenticator_from_environment
 from .gateway import GatewayError, ToolGateway
+from .mcp_server import build_mcp_runtime
 from .policy import PolicyConfig, PolicyEngine
 from .store import SQLiteStore, StoreError
 
@@ -60,22 +62,30 @@ def create_app(
         PolicyConfig(self_service_refund_limit_minor=refund_limit)
     )
     gateway = ToolGateway(store, policy, approvals)
+    mcp_server, mcp_http_app = build_mcp_runtime(gateway, authenticator)
     if harness_client is None:
         try:
             harness_client = AgentCoreHarnessClient.from_environment()
         except AgentCoreNotConfigured:
             harness_client = None
 
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        async with mcp_server.session_manager.run():
+            yield
+
     app = FastAPI(
         title="Shadow Hunter",
-        version="0.2.0",
-        description="Deterministic policy enforcement for an AgentCore-managed refund assistant.",
+        version="0.3.0",
+        description="Deterministic policy enforcement with an authenticated MCP tool server.",
+        lifespan=lifespan,
     )
     app.state.store = store
     app.state.authenticator = authenticator
     app.state.approvals = approvals
     app.state.gateway = gateway
     app.state.harness_client = harness_client
+    app.state.mcp_server = mcp_server
     app.state.demo_mode = os.environ.get("SHADOW_HUNTER_DEMO_MODE", "").lower() == "true"
 
     def customer(authorization: str | None):
@@ -101,6 +111,7 @@ def create_app(
         return {
             "status": "ok",
             "agentcore_configured": harness_client is not None,
+            "mcp_server_enabled": True,
             "demo_mode": app.state.demo_mode,
         }
 
@@ -278,6 +289,11 @@ def create_app(
             refund_eligible=True,
         )
         return {"status": "seeded", "order_id": "order-demo-001"}
+
+    # The MCP endpoint is /mcp/ (the mount prefix plus the SDK root path).
+    # Its host protection remains localhost-only until an explicit allowlist
+    # is configured and reviewed for a remote deployment.
+    app.mount("/mcp", mcp_http_app)
 
     return app
 
