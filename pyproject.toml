@@ -13,7 +13,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "PyJWT[crypto]>=2.10", "mcp>=2.2.0,<3", "mangum>=0.22.0"]
-server = ["fastapi>=0.115", "uvicorn[standard]>=0.30", "PyJWT[crypto]>=2.10", "mcp>=2.2.0,<3"]
+server = ["fastapi>=0.115", "uvicorn[standard]>=0.30", "PyJWT[crypto]>=2.10", "mcp>=2.2.0,<3", "httpx2>=2.0,<3"]
 aws = ["boto3>=1.44", "mangum>=0.22.0"]
 
 [project.scripts]
@@ -21,6 +21,7 @@ shadow-hunter-api = "shadow_hunter.api:run"
 shadow-hunter-audit-reconcile = "shadow_hunter.audit_reconcile:main"
 shadow-hunter-audit-verify = "shadow_hunter.audit_verify:main"
 shadow-hunter-audit-replay = "shadow_hunter.audit_replay:main"
+shadow-hunter-agntid-demo = "shadow_hunter.agntid_demo:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

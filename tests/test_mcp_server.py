@@ -181,3 +181,63 @@ def test_tool_dispatch_uses_authenticated_principal_and_server_assigned_agent():
     assert gateway.arguments["principal"] == principal
     assert gateway.arguments["agent_id"] == "trusted-agent"
     assert gateway.arguments["tool_name"] == "get_order"
+
+
+
+def test_customer_pass_through_uses_cognito_customer_authenticator():
+    class CustomerAuthenticator:
+        def authenticate_customer(self, token):
+            if token == "customer-token":
+                return Principal("customer-sub", "tenant-1", "customer-1", True)
+            return None
+
+    seen = []
+
+    async def downstream(scope, receive, send):
+        seen.append(get_mcp_caller())
+        await send({"type": "http.response.start", "status": 204, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    app = AuthenticatedMCPASGI(
+        downstream,
+        CustomerAuthenticator(),
+        agent_id="agntid-integration",
+        auth_profile="customer",
+    )
+    events = _run_asgi(app, _http_scope(b"Bearer customer-token"))
+    assert _status(events) == 204
+    assert seen[0].principal.subject_id == "customer-sub"
+    assert seen[0].agent_id == "agntid-integration"
+
+
+def test_demo_header_is_uuid_correlation_only():
+    from shadow_hunter.mcp_server import _demo_run_id_from_scope
+
+    run_id = "9c7f5c21-7c18-4b99-9c14-f07fcf79c401"
+    scope = _http_scope(b"Bearer valid-token")
+    scope["headers"].append((b"x-shadow-hunter-demo-id", run_id.encode("ascii")))
+    assert _demo_run_id_from_scope(scope) == run_id
+
+
+def test_duplicate_demo_correlation_headers_are_ignored():
+    from shadow_hunter.mcp_server import _demo_run_id_from_scope
+
+    run_id = b"9c7f5c21-7c18-4b99-9c14-f07fcf79c401"
+    scope = _http_scope(b"Bearer valid-token")
+    scope["headers"].extend([
+        (b"x-shadow-hunter-demo-id", run_id),
+        (b"x-shadow-hunter-demo-id", run_id),
+    ])
+    assert _demo_run_id_from_scope(scope) is None
+
+
+def test_customer_profile_rejects_authenticator_without_customer_method():
+    import pytest
+
+    with pytest.raises(TypeError, match="authenticate_customer"):
+        AuthenticatedMCPASGI(
+            lambda scope, receive, send: None,
+            object(),
+            agent_id="agent",
+            auth_profile="customer",
+        )

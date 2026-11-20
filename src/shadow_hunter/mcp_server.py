@@ -34,6 +34,7 @@ class MCPCaller:
 
     principal: Principal
     agent_id: str
+    demo_run_id: str | None = None
 
 
 _current_caller: ContextVar[MCPCaller | None] = ContextVar(
@@ -47,15 +48,16 @@ def get_mcp_caller() -> MCPCaller | None:
     return _current_caller.get()
 
 
-def _trusted_agent_id(authenticator: Any) -> str:
-    """Resolve agent identity only from verified server-side configuration."""
+def _trusted_agent_id(authenticator: Any, auth_profile: str) -> str:
+    """Resolve a verified actor ID or fixed, server-side audit attribution."""
 
-    if isinstance(authenticator, CognitoJWTAuthenticator):
-        # authenticate_gateway_tool validates the token's act.sub against this
-        # configured value before the request reaches a tool handler.
+    if auth_profile == "gateway" and isinstance(authenticator, CognitoJWTAuthenticator):
         candidate = authenticator.actor_subject
+    elif isinstance(authenticator, CognitoJWTAuthenticator):
+        # Pass-through authenticates the customer, not the agent. This value is
+        # audit attribution only and must never be treated as agent identity.
+        candidate = os.environ.get("SHADOW_HUNTER_MCP_AGENT_ID", "").strip()
     else:
-        # Opaque local token mappings are for local demonstrations only.
         candidate = os.environ.get(
             "SHADOW_HUNTER_MCP_LOCAL_AGENT_ID", "shadow-hunter-local-agent"
         ).strip()
@@ -63,6 +65,49 @@ def _trusted_agent_id(authenticator: Any) -> str:
     if not isinstance(candidate, str) or _AGENT_ID.fullmatch(candidate) is None:
         raise RuntimeError("A valid server-configured MCP agent identity is required")
     return candidate
+
+
+def _demo_run_id_from_scope(scope: dict[str, Any]) -> str | None:
+    """Read a UUID correlation marker; it never affects authentication."""
+
+    values = [
+        value for name, value in scope.get("headers", [])
+        if isinstance(name, bytes) and name.lower() == b"x-shadow-hunter-demo-id"
+    ]
+    if len(values) != 1:
+        return None
+    try:
+        from uuid import UUID
+        return str(UUID(values[0].decode("ascii")))
+    except (UnicodeDecodeError, ValueError, AttributeError):
+        return None
+
+
+def _transport_security_from_environment() -> Any | None:
+    """Configure exact MCP host/origin allowlists when explicitly requested."""
+
+    raw_hosts = os.environ.get("SHADOW_HUNTER_MCP_ALLOWED_HOSTS", "")
+    if not raw_hosts.strip():
+        return None  # Keep the SDK's safe localhost-only default.
+
+    hosts = [value.strip() for value in raw_hosts.split(",") if value.strip()]
+    if not hosts or any(value == "*" for value in hosts):
+        raise RuntimeError("SHADOW_HUNTER_MCP_ALLOWED_HOSTS must be an exact host allowlist")
+
+    try:
+        from mcp.server.transport_security import TransportSecuritySettings
+    except ImportError as exc:
+        raise RuntimeError("MCP SDK transport-security settings are unavailable") from exc
+
+    raw_origins = os.environ.get("SHADOW_HUNTER_MCP_ALLOWED_ORIGINS", "")
+    origins = [value.strip() for value in raw_origins.split(",") if value.strip()]
+    if any(value == "*" for value in origins):
+        raise RuntimeError("Wildcard MCP origins are not permitted")
+
+    kwargs: dict[str, Any] = {"allowed_hosts": hosts}
+    if origins:
+        kwargs["allowed_origins"] = origins
+    return TransportSecuritySettings(**kwargs)
 
 
 def _bearer_from_scope(scope: dict[str, Any]) -> str | None:
@@ -121,14 +166,31 @@ def _valid_principal(value: object) -> bool:
 class AuthenticatedMCPASGI:
     """Authenticate every HTTP request before MCP parses or dispatches it."""
 
-    def __init__(self, app: Any, authenticator: Any, agent_id: str) -> None:
-        if not callable(getattr(authenticator, "authenticate_gateway_tool", None)):
-            raise TypeError("authenticator must implement authenticate_gateway_tool")
+    def __init__(
+        self,
+        app: Any,
+        authenticator: Any,
+        agent_id: str,
+        *,
+        auth_profile: str = "gateway",
+    ) -> None:
+        methods = {
+            "gateway": "authenticate_gateway_tool",
+            "customer": "authenticate_customer",
+        }
+        method_name = methods.get(auth_profile)
+        if method_name is None:
+            raise ValueError("auth_profile must be 'gateway' or 'customer'")
+        authenticate = getattr(authenticator, method_name, None)
+        if not callable(authenticate):
+            raise TypeError(f"authenticator must implement {method_name}")
         if not isinstance(agent_id, str) or _AGENT_ID.fullmatch(agent_id) is None:
             raise ValueError("agent_id must be a valid server-configured identifier")
         self.app = app
         self.authenticator = authenticator
         self.agent_id = agent_id
+        self.auth_profile = auth_profile
+        self._authenticate = authenticate
 
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         if scope.get("type") != "http":
@@ -142,7 +204,7 @@ class AuthenticatedMCPASGI:
             return
 
         try:
-            principal = self.authenticator.authenticate_gateway_tool(bearer)
+            principal = self._authenticate(bearer)
         except Exception:
             # JWKS/network/configuration failures never fall back to local identity.
             principal = None
@@ -151,7 +213,11 @@ class AuthenticatedMCPASGI:
             await _reject(send, status=401, error="authentication_required")
             return
 
-        caller = MCPCaller(principal=principal, agent_id=self.agent_id)
+        caller = MCPCaller(
+            principal=principal,
+            agent_id=self.agent_id,
+            demo_run_id=_demo_run_id_from_scope(scope),
+        )
         context_token = _current_caller.set(caller)
         try:
             await self.app(scope, receive, send)
@@ -168,7 +234,11 @@ def invoke_current_tool(
 
     caller = get_mcp_caller()
     request_id = str(uuid4())
-    trace_id = str(uuid4())
+    trace_id = (
+        caller.demo_run_id
+        if caller is not None and caller.demo_run_id
+        else str(uuid4())
+    )
     if caller is None:
         # In-memory or non-HTTP invocation has no authenticated request context.
         # It must never inherit an identity from clientInfo or tool arguments.
@@ -199,7 +269,10 @@ def build_mcp_runtime(gateway: ToolGateway, authenticator: Any) -> tuple[Any, An
             'Install the server extra to enable MCP: pip install -e ".[server]"'
         ) from exc
 
-    agent_id = _trusted_agent_id(authenticator)
+    auth_profile = os.environ.get(
+        "SHADOW_HUNTER_MCP_AUTH_PROFILE", "gateway"
+    ).strip().lower()
+    agent_id = _trusted_agent_id(authenticator, auth_profile)
     server = MCPServer("Shadow Hunter")
 
     @server.tool()
@@ -247,8 +320,14 @@ def build_mcp_runtime(gateway: ToolGateway, authenticator: Any) -> tuple[Any, An
     # The SDK's default transport security is localhost-only. Do not expose this
     # endpoint on a public hostname until an explicit host allowlist and TLS
     # deployment have been reviewed.
-    http_app = server.streamable_http_app(streamable_http_path="/")
+    http_app = server.streamable_http_app(
+        streamable_http_path="/",
+        transport_security=_transport_security_from_environment(),
+    )
     authenticated_app = AuthenticatedMCPASGI(
-        http_app, authenticator=authenticator, agent_id=agent_id
+        http_app,
+        authenticator=authenticator,
+        agent_id=agent_id,
+        auth_profile=auth_profile,
     )
     return server, authenticated_app

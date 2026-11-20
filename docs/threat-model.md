@@ -120,3 +120,22 @@ hostname is enabled.
   behind a separate operator approval capability.
 - Risk scores are deterministic heuristic indicators, not calibrated probabilities
   or proof of prompt-injection detection accuracy.
+
+
+## AgntID pass-through and run correlation
+
+Customer pass-through verifies the original Cognito JWT with the existing
+signature, issuer, expiry, app-client, scope, subject, tenant and customer
+checks. It proves user identity, not agent identity; the server-side agent
+label is audit attribution only. OBO mode still requires target audience,
+scope, subject, and act.sub.
+
+The optional UUID demo header is correlation metadata only. Duplicate or
+malformed values are ignored and cannot affect the principal, tenant,
+customer, tool allowlist, or policy. AgntID must forward it for shared trace
+IDs; otherwise tool results provide their own backend trace IDs.
+
+The model sees read tools only. A separate write probe targets a disposable
+order-demo record and uses a unique idempotency key; it never calls the
+operator refund execution route. If AgntID fails to block the probe, it can
+create only a pending sandbox approval, not execute a refund.

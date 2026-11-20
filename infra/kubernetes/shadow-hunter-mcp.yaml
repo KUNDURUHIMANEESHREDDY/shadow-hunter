@@ -1,0 +1,130 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shadow-hunter-mcp
+  labels:
+    app.kubernetes.io/name: shadow-hunter-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: shadow-hunter-mcp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: shadow-hunter-mcp
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: shadow-hunter
+          image: ghcr.io/KUNDURUHIMANEESHREDDY/shadow-hunter:REPLACE_WITH_TAG
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          env:
+            - name: SHADOW_HUNTER_HOST
+              value: "0.0.0.0"
+            - name: SHADOW_HUNTER_PORT
+              value: "8000"
+            - name: SHADOW_HUNTER_AUTH_MODE
+              value: "cognito"
+            - name: SHADOW_HUNTER_MCP_AUTH_PROFILE
+              value: "customer"
+            - name: SHADOW_HUNTER_MCP_AGENT_ID
+              value: "agntid-proxy-refund-demo"
+            - name: SHADOW_HUNTER_MCP_ALLOWED_HOSTS
+              value: "shadow-hunter-mcp.default.svc.cluster.local:8000,shadow-hunter-mcp:8000"
+            - name: SHADOW_HUNTER_DB_PATH
+              value: "/data/shadow_hunter.sqlite3"
+            - name: SHADOW_HUNTER_DEMO_MODE
+              value: "true"
+            - name: SHADOW_HUNTER_COGNITO_ISSUER
+              valueFrom:
+                secretKeyRef:
+                  name: shadow-hunter-cognito
+                  key: SHADOW_HUNTER_COGNITO_ISSUER
+            - name: SHADOW_HUNTER_COGNITO_CUSTOMER_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: shadow-hunter-cognito
+                  key: SHADOW_HUNTER_COGNITO_CUSTOMER_CLIENT_ID
+            - name: SHADOW_HUNTER_COGNITO_CUSTOMER_SCOPE
+              valueFrom:
+                secretKeyRef:
+                  name: shadow-hunter-cognito
+                  key: SHADOW_HUNTER_COGNITO_CUSTOMER_SCOPE
+            - name: SHADOW_HUNTER_COGNITO_TOOL_AUDIENCE
+              valueFrom:
+                secretKeyRef:
+                  name: shadow-hunter-cognito
+                  key: SHADOW_HUNTER_COGNITO_TOOL_AUDIENCE
+            - name: SHADOW_HUNTER_COGNITO_TOOL_SCOPE
+              valueFrom:
+                secretKeyRef:
+                  name: shadow-hunter-cognito
+                  key: SHADOW_HUNTER_COGNITO_TOOL_SCOPE
+            - name: SHADOW_HUNTER_COGNITO_ACTOR_SUB
+              valueFrom:
+                secretKeyRef:
+                  name: shadow-hunter-cognito
+                  key: SHADOW_HUNTER_COGNITO_ACTOR_SUB
+          volumeMounts:
+            - name: demo-data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 192Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 2
+      volumes:
+        - name: demo-data
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 32Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shadow-hunter-mcp
+  labels:
+    app.kubernetes.io/name: shadow-hunter-mcp
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: shadow-hunter-mcp
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      protocol: TCP

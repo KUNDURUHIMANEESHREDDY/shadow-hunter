@@ -162,3 +162,23 @@ The MCP transport is localhost-only by default. AgntID proxy configuration and
 the challenge-specific credential contract remain unverified; a token that
 does not satisfy the existing verifier is rejected rather than trusted or forwarded.
 See docs/agntid-integration.md.
+
+
+## AgntID pass-through and agent demo runner
+
+The MCP server supports the existing Cognito customer-token authenticator for
+pass-through and the delegated Gateway OBO profile. Both retain JWT
+verification and backend tenant/customer authorization. In customer mode,
+the server-configured agent label is audit attribution, not cryptographic
+proof of the remote agent identity.
+
+A UUID `X-Shadow-Hunter-Demo-ID` header optionally correlates calls within
+one agent run; it never contributes to authentication or authorization. The
+MCP SDK Host allowlist is configurable using exact hostnames; localhost-only
+remains the default.
+
+The `shadow-hunter-agntid-demo` runner uses Ollama and the official MCP SDK
+Client. It exposes read tools only to the model, then sends a separate
+sandbox-only write probe through the same proxy. Explicit AgntID decisions
+are distinguished from backend decisions and unattributed errors.
+See `docs/agntid-integration.md`.
