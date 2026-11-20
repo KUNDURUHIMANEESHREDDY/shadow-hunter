@@ -70,8 +70,9 @@ maps remain available for local demos only; there is no fallback from Cognito
 mode to local tokens.
 
 Cognito pre-token-generation must emit trusted `tenant_id` and `customer_id`
-claims into both customer and token-exchange access tokens. Use a V2 access
-token customization event and derive these values from trusted user-pool
+claims into both customer and token-exchange access tokens. Use a V3_0 access
+token customization event for this deployment because the same trigger must
+also handle M2M ClientCredentials actor-token events. Derive these values from trusted user-pool
 attributes or a tenant directory. The token-exchange trigger can customize
 claims but cannot add scopes. Therefore the original subject token must
 already contain the delegated scope requested for the target. The tool API
@@ -91,7 +92,7 @@ Set `SHADOW_HUNTER_AUTH_MODE=cognito` and configure:
 - `SHADOW_HUNTER_COGNITO_OPERATOR_GROUP` — defaults to `shadow_hunter_operators`.
 - `SHADOW_HUNTER_COGNITO_OPERATOR_CLIENT_ID` — required separate operator app-client ID for the deployed API stack.
 
-Register both customer and delegated refund scopes for the original subject-token app client. Cognito token exchange only down-scopes to the intersection of requested, subject-token, and client-allowed scopes; it cannot add a missing refund scope. The pre-token-generation V2 trigger should add trusted `tenant_id` and `customer_id` claims to both original and derived access tokens. The OBO token must contain an `act.sub` that matches the configured actor identity.
+Register both customer and delegated refund scopes for the original subject-token app client. Cognito token exchange only down-scopes to the intersection of requested, subject-token, and client-allowed scopes; it cannot add a missing refund scope. The pre-token-generation V3_0 trigger should add trusted `tenant_id` and `customer_id` claims to both original and derived access tokens. The OBO token must contain an `act.sub` that matches the configured actor identity.
 
 ## Deployment sequence
 
