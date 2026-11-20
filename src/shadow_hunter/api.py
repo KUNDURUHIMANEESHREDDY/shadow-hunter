@@ -15,7 +15,7 @@ from .agentcore import (
     AgentCoreNotConfigured,
 )
 from .approvals import ApprovalService
-from .auth import build_authenticator_from_environment
+from .auth import TokenAuthenticator
 from .gateway import GatewayError, ToolGateway
 from .policy import PolicyConfig, PolicyEngine
 from .store import SQLiteStore, StoreError
@@ -36,12 +36,12 @@ def _bearer(authorization: str | None) -> str | None:
 def create_app(
     *,
     store: SQLiteStore | None = None,
-    authenticator: Any | None = None,
+    authenticator: TokenAuthenticator | None = None,
     harness_client: AgentCoreHarnessClient | None = None,
 ) -> FastAPI:
     database_path = os.environ.get("SHADOW_HUNTER_DB_PATH", "shadow_hunter.sqlite3")
     store = store or SQLiteStore(database_path)
-    authenticator = authenticator or build_authenticator_from_environment()
+    authenticator = authenticator or TokenAuthenticator.from_environment()
     approval_ttl = int(os.environ.get("SHADOW_HUNTER_APPROVAL_TTL_SECONDS", "600"))
     refund_limit = int(os.environ.get("SHADOW_HUNTER_REFUND_LIMIT_MINOR", "10000"))
     approvals = ApprovalService(store, ttl_seconds=approval_ttl)
@@ -71,12 +71,6 @@ def create_app(
         principal = authenticator.authenticate_customer(_bearer(authorization))
         if principal is None:
             raise HTTPException(status_code=401, detail="Valid customer authentication required")
-        return principal
-
-    def gateway_tool_principal(authorization: str | None):
-        principal = authenticator.authenticate_gateway_tool(_bearer(authorization))
-        if principal is None:
-            raise HTTPException(status_code=401, detail="Valid delegated Gateway token required")
         return principal
 
     def operator(authorization: str | None) -> str:
@@ -137,7 +131,7 @@ def create_app(
         body: dict[str, Any] = Body(...),
         authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
-        principal = gateway_tool_principal(authorization)
+        principal = customer(authorization)
         if set(body) - {"request_id", "trace_id", "arguments"}:
             raise HTTPException(status_code=422, detail="Unexpected request fields")
         arguments = body.get("arguments")

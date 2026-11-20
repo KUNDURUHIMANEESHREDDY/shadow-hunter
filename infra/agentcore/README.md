@@ -57,16 +57,41 @@ the credential-provider configuration to the Gateway OpenAPI target when
 creating the target. Select `OAUTH` and `TOKEN_EXCHANGE`, not
 `GATEWAY_IAM_ROLE` or `JWT_PASSTHROUGH`, for this end-user identity hop.
 
-### Remaining application boundary work
+### Application JWT verification
 
-The current FastAPI app still uses the environment-backed `TokenAuthenticator`
-map intended for local development. It is not a Cognito JWT verifier and
-cannot validate arbitrary exchanged tokens. The next implementation step is
-to verify the derived JWT at the application boundary (issuer, signature,
-expiry, audience, scope, and actor claim), then map trusted tenant/customer
-claims into the existing `Principal` contract. Until that exists, the
-production identity chain is not complete and the application tool API must
-not be exposed as a production target.
+The application JWT verifier is implemented in `src/shadow_hunter/auth.py`.
+Set `SHADOW_HUNTER_AUTH_MODE=cognito` and configure the variables below.
+Customer chat validates the original access token against the customer app
+client ID and customer scope. The Gateway tool route accepts only the derived
+OBO token and validates its resource audience, refund scope, subject, issuer,
+expiry, RS256 signature, and exact `act.sub` actor identity. Operator routes
+require a configured Cognito group. In `local` mode the existing opaque token
+maps remain available for local demos only; there is no fallback from Cognito
+mode to local tokens.
+
+Cognito pre-token-generation must emit trusted `tenant_id` and `customer_id`
+claims into both customer and token-exchange access tokens. Use a V2 access
+token customization event and derive these values from trusted user-pool
+attributes or a tenant directory. The token-exchange trigger can customize
+claims but cannot add scopes. Therefore the original subject token must
+already contain the delegated scope requested for the target. The tool API
+must not be exposed until the Cognito claims, scopes, OBO actor, and JWKS
+issuer have been configured and independently verified.
+
+### Required application configuration
+
+Set `SHADOW_HUNTER_AUTH_MODE=cognito` and configure:
+
+- `SHADOW_HUNTER_COGNITO_ISSUER` — exact Cognito user-pool issuer.
+- `SHADOW_HUNTER_COGNITO_CUSTOMER_CLIENT_ID` — customer-facing app-client ID.
+- `SHADOW_HUNTER_COGNITO_CUSTOMER_SCOPE` — defaults to `shadow-hunter/customer`.
+- `SHADOW_HUNTER_COGNITO_TOOL_AUDIENCE` — registered resource-server audience in the OBO token.
+- `SHADOW_HUNTER_COGNITO_TOOL_SCOPE` — defaults only in documentation; configure the exact `shadow-hunter-api/refunds` target scope.
+- `SHADOW_HUNTER_COGNITO_ACTOR_SUB` — exact `act.sub` value issued for the delegated agent.
+- `SHADOW_HUNTER_COGNITO_OPERATOR_GROUP` — defaults to `shadow_hunter_operators`.
+- `SHADOW_HUNTER_COGNITO_OPERATOR_CLIENT_ID` — optional separate operator app-client ID.
+
+Register both customer and delegated refund scopes for the original subject-token app client. Cognito token exchange only down-scopes to the intersection of requested, subject-token, and client-allowed scopes; it cannot add a missing refund scope. The pre-token-generation V2 trigger should add trusted `tenant_id` and `customer_id` claims to both original and derived access tokens. The OBO token must contain an `act.sub` that matches the configured actor identity.
 
 ## Deployment sequence
 

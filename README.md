@@ -166,7 +166,7 @@ ChatGPT task automations currently support daily, weekly, and monthly recurring 
 | Codex + Copilot subagents | 14 PROFILES DEFINED; RUNTIME NOT YET VERIFIED | Seven Codex TOML agents and seven Copilot `.agent.md` profiles; frontmatter and tool scopes validate; interactive invocation not yet proven |
 | Application code | POLICY CORE + TOOL GATEWAY + API ADDED — UNTESTED | `src/shadow_hunter/`; authenticated tool route, strict tool allowlist and customer/resource checks |
 | Policy engine | DETERMINISTIC ALLOW / DENY / ESCALATE | Own-order reads, refund validation, configured threshold and default-deny unknown tools |
-| AWS integration | HARNESS BEARER-JWT INVOCATION SLICE ADDED — NOT DEPLOYED | Adapter forwards caller JWT to a `CUSTOM_JWT` Harness; Gateway target OBO template added. Application-side verification of derived JWT claims remains outstanding. |
+| AWS identity | COGNITO + OBO JWT VALIDATION ADDED — UNTESTED / NOT DEPLOYED | Customer, operator, and delegated Gateway token profiles verify RS256/JWKS, issuer, expiry, scopes, audience, claims and actor. Cognito resources remain unconfigured. |
 | Frontend / trace viewer | OPERATOR CONSOLE + TRACE DETAIL ADDED — UNTESTED | `/operator` displays approval queue, metrics, recent audit, and a per-trace event chain |
 | Approval engine | ADDED — UNTESTED | Parameter/action-digest-bound, expiring, one-time approval capability; token hash stored, raw token returned once |
 | Refund execution | LOCAL DEMO LEDGER ONLY — UNTESTED | Operator-only execution checks approval, expiry, token, stored digest, order state and remaining balance; retry is idempotent |
@@ -202,11 +202,13 @@ THIRD_PARTY_NOTICES.md         Skill and dependency attribution
 
 Python 3.11+ is required. Install the API and optional AWS SDK with `python -m pip install -e ".[server,aws,dev]"`, then start the local API with `shadow-hunter-api`. The API listens on `127.0.0.1:8000` by default and serves the operator console at `/operator`.
 
-Configure `SHADOW_HUNTER_CUSTOMER_TOKENS` and `SHADOW_HUNTER_OPERATOR_TOKENS` as JSON maps of opaque bearer tokens to trusted server-side identity claims. Customer entries require `subject_id`, `tenant_id`, and `customer_id`; operator entries require `subject_id`. Do not put tokens in source control or request bodies. The environment-backed token adapter is for local development; production should validate Cognito/JWT identity at API Gateway and pass verified claims to the application.
+Local demo mode is the default. Configure `SHADOW_HUNTER_CUSTOMER_TOKENS` and `SHADOW_HUNTER_OPERATOR_TOKENS` as JSON maps of opaque bearer tokens to trusted server-side identity claims. Do not put tokens in source control or request bodies. Opaque tokens are for local development only.
 
-Set `SHADOW_HUNTER_DB_PATH` to choose the SQLite file, `SHADOW_HUNTER_REFUND_LIMIT_MINOR` for the configured self-service threshold, and `SHADOW_HUNTER_APPROVAL_TTL_SECONDS` for approval expiry. Set `SHADOW_HUNTER_HARNESS_ARN` and `AWS_REGION` to enable the AgentCore Harness chat route using the current Boto3 SigV4 adapter. It passes `runtimeUserId` for runtime context and `actorId` for memory; neither is an authentication credential. AWS documents that SigV4 callers do not propagate per-user identity into downstream tools. Production customer access therefore still requires a Harness CUSTOM_JWT inbound authorizer, Bearer-JWT invocation, and verified identity propagation through AgentCore Identity/Gateway into the application tool boundary. That identity path is not yet implemented. Set `SHADOW_HUNTER_DEMO_MODE=true` to enable the operator-only demo order seed route. The local refund execution updates a demo ledger only; it does not call a payment provider.
+For Cognito mode set `SHADOW_HUNTER_AUTH_MODE=cognito` and the variables documented in `infra/agentcore/README.md`. Customer chat uses a Cognito access token; `/v1/agent/tools/{tool_name}` requires a separate OBO token with the configured target audience, scope and actor claim. The application verifies each token against the user-pool JWKS before creating a Principal. Do not expose the API target until the Cognito pre-token-generation claims, scopes, and AgentCore OBO configuration are deployed and verified.
 
-These commands and interfaces are documented but have not been run. No AWS resources have been created or deployed.
+Set `SHADOW_HUNTER_DB_PATH` to choose the SQLite file, `SHADOW_HUNTER_REFUND_LIMIT_MINOR` for the configured self-service threshold, and `SHADOW_HUNTER_APPROVAL_TTL_SECONDS` for approval expiry. Set `SHADOW_HUNTER_HARNESS_ARN` and `AWS_REGION` to enable the AgentCore Harness chat route. Set `SHADOW_HUNTER_DEMO_MODE=true` to enable the operator-only demo order seed route. Local refund execution updates a demo ledger only; it does not call a payment provider.
+
+No commands, tests, builds, lint, or security checks have been run during this engineering cycle. No AWS resources have been created or deployed.
 
 ## Cost and automation policy
 
