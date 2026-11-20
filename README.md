@@ -179,12 +179,13 @@ ChatGPT task automations currently support daily, weekly, and monthly recurring 
 | AWS persistence | DYNAMODB ADAPTER + TABLE TEMPLATE ADDED — UNTESTED / NOT DEPLOYED | Transactional adapter preserves the SQLiteStore contract; table template uses GSI1, on-demand capacity, KMS encryption, 35-day PITR and TTL cleanup for expired A2A nonce claims. |
 | Audit archive | OBJECT LOCK EXPORT + RECONCILIATION / DLQ REPLAY TOOLS ADDED — UNTESTED / NOT DEPLOYED | Conditional S3 writes, redacted events, key-level reconciliation, dry-run-first replay from retained stream sequence ranges; SQS DLQ holds metadata only and stream records expire after 24 hours. |
 | Lambda/API deployment | SAM TEMPLATE + ROUTE JWT AUTHORIZERS ADDED — UNTESTED / NOT DEPLOYED | FastAPI/Mangum Lambda, explicit customer/OBO/operator routes, and DynamoDB-only runtime IAM template. |
-| Production AWS data plane | NOT DEPLOYED | Cognito, AgentCore, DynamoDB and application stacks still require approved account-specific deployment and end-to-end verification. |
+| Infrastructure template review | OFFLINE STRUCTURAL REVIEW PASSED — FORMAL SCHEMA VALIDATION PENDING | All three templates parse and local Ref/GetAtt references resolve; SAM CLI/cfn-lint are unavailable in this environment. See [production readiness](docs/production-deployment-readiness.md). |
+| Production AWS data plane | PRE-DEPLOYMENT REVIEW — NOT DEPLOYED | Three SAM templates received offline YAML/reference review; formal SAM/cfn-lint validation is pending. Cognito pool/client/resource-server configuration and trigger association remain incomplete; deployment requires explicit billing approval. See [production readiness](docs/production-deployment-readiness.md). |
 | Adversarial benchmark | METRICS + EIGHT SCENARIOS AUTHORED — NOT EXECUTED | Measures policy-level attack success, defensive effectiveness, false-denial rate and expected-outcome accuracy; no benchmark values claimed because tests/evaluations remain unrun |
 | GitHub Actions workflow | REMOVED | No unattended runner workflow remains in the repository |
 | Self-hosted runner | REMOVED FROM DESIGN | No runner is used for assistant-led interactive coding |
 | Assistant-led coding | INTERACTIVE ONLY | Work is performed in the active ChatGPT session; no reusable ChatGPT session endpoint or background execution is available |
-| Production deployment | NOT STARTED | Requires AWS account/region, billing guard, IAM and deployment validation |
+| Production deployment | BLOCKED — APPROVAL + VALIDATION + IDENTITY CONFIGURATION PENDING | No AWS resources created; formal SAM validation, Cognito foundation, staged integration and independent audit demo remain outstanding. |
 
 Only move a row to COMPLETE after adding a commit, test result, deployed resource identifier, or other inspectable evidence. Update this table after every engineering cycle.
 

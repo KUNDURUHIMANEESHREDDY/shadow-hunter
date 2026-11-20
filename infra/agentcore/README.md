@@ -89,7 +89,7 @@ Set `SHADOW_HUNTER_AUTH_MODE=cognito` and configure:
 - `SHADOW_HUNTER_COGNITO_TOOL_SCOPE` — defaults only in documentation; configure the exact `shadow-hunter-api/refunds` target scope.
 - `SHADOW_HUNTER_COGNITO_ACTOR_SUB` — exact `act.sub` value issued for the delegated agent.
 - `SHADOW_HUNTER_COGNITO_OPERATOR_GROUP` — defaults to `shadow_hunter_operators`.
-- `SHADOW_HUNTER_COGNITO_OPERATOR_CLIENT_ID` — optional separate operator app-client ID.
+- `SHADOW_HUNTER_COGNITO_OPERATOR_CLIENT_ID` — required separate operator app-client ID for the deployed API stack.
 
 Register both customer and delegated refund scopes for the original subject-token app client. Cognito token exchange only down-scopes to the intersection of requested, subject-token, and client-allowed scopes; it cannot add a missing refund scope. The pre-token-generation V2 trigger should add trusted `tenant_id` and `customer_id` claims to both original and derived access tokens. The OBO token must contain an `act.sub` that matches the configured actor identity.
 

@@ -220,3 +220,18 @@ operations use point reads, indexed queries, puts, updates, and transactions.
 - The stream/exporter/archive stack is authored but untested and undeployed.
 - Historical DynamoDB rows created before stream enablement are not backfilled.
 - The production table and archive are not provisioned by this repository change.
+
+
+## Independent read-only archive verification
+
+The key-reconciliation command above does not read object bodies. For the production evidence demo, use a separate auditor identity described by
+`audit-verification-policy.example.json`. It is deliberately separate from
+the exporter and DLQ replay roles.
+
+The verifier needs only `dynamodb:Query` on the AUDIT GSI and
+`s3:GetObject` on `audit-events/*`. It must not receive PutObject,
+DeleteObject, queue-consume, table-write, Object Lock retention, or Governance
+bypass permissions. Use it to retrieve the source audit row and the matching
+deterministic S3 JSON object, then compare the event identity and decision
+fields. Keep the comparison output limited to event IDs, trace/request IDs,
+object keys, hashes, and mismatch status; do not print full audit payloads.

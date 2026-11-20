@@ -1,0 +1,17 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadAuditRowsThroughGsiOnly",
+      "Effect": "Allow",
+      "Action": ["dynamodb:Query"],
+      "Resource": "REPLACE_WITH_TABLE_ARN/index/GSI1"
+    },
+    {
+      "Sid": "ReadAuditArchiveObjectsOnly",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject"],
+      "Resource": "REPLACE_WITH_AUDIT_BUCKET_ARN/audit-events/*"
+    }
+  ]
+}
