@@ -154,7 +154,7 @@ Work is performed in an active ChatGPT session using the connected GitHub integr
 
 ChatGPT task automations currently support daily, weekly, and monthly recurring schedules, not hourly schedules. They cannot provide 24 separate hourly 30-minute coding sessions or keep this exact model session continuously active in the background. See [engineering workflow](docs/engineering-cycle.md).
 
-## Build status — 19 November 2026
+## Build status — 20 November 2026
 
 | Component | Current state | Evidence / next action |
 |---|---|---|
@@ -166,7 +166,7 @@ ChatGPT task automations currently support daily, weekly, and monthly recurring 
 | Codex + Copilot subagents | 14 PROFILES DEFINED; RUNTIME NOT YET VERIFIED | Seven Codex TOML agents and seven Copilot `.agent.md` profiles; frontmatter and tool scopes validate; interactive invocation not yet proven |
 | Application code | POLICY CORE + TOOL GATEWAY + API ADDED — UNTESTED | `src/shadow_hunter/`; authenticated tool route, strict tool allowlist and customer/resource checks |
 | Policy engine | DETERMINISTIC ALLOW / DENY / ESCALATE | Own-order reads, refund validation, configured threshold and default-deny unknown tools |
-| AWS integration | AGENTCORE HARNESS INVOKE ADAPTER + CONFIG TEMPLATES ADDED — NOT DEPLOYED | Uses `invoke_harness`; Gateway, Cedar, Harness and OpenAPI templates are in `infra/agentcore/`; end-user JWT propagation remains unresolved |
+| AWS integration | HARNESS BEARER-JWT INVOCATION SLICE ADDED — NOT DEPLOYED | Adapter forwards caller JWT to a `CUSTOM_JWT` Harness; Gateway target OBO template added. Application-side verification of derived JWT claims remains outstanding. |
 | Frontend / trace viewer | OPERATOR CONSOLE + TRACE DETAIL ADDED — UNTESTED | `/operator` displays approval queue, metrics, recent audit, and a per-trace event chain |
 | Approval engine | ADDED — UNTESTED | Parameter/action-digest-bound, expiring, one-time approval capability; token hash stored, raw token returned once |
 | Refund execution | LOCAL DEMO LEDGER ONLY — UNTESTED | Operator-only execution checks approval, expiry, token, stored digest, order state and remaining balance; retry is idempotent |

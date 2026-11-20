@@ -96,6 +96,7 @@ def create_app(
         body: dict[str, Any] = Body(...),
         authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
+        bearer_token = _bearer(authorization)
         principal = customer(authorization)
         if set(body) - {"prompt", "session_id"}:
             raise HTTPException(status_code=422, detail="Unexpected request fields")
@@ -115,6 +116,7 @@ def create_app(
         try:
             result = harness_client.invoke(
                 prompt=prompt,
+                bearer_token=bearer_token or "",
                 session_id=session_id,
                 actor_id=principal.subject_id,
                 trace_id=trace_id,

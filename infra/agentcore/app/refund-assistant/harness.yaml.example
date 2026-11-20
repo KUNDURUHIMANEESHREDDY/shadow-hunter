@@ -1,7 +1,13 @@
-# Copy to harness.yaml after replacing both ARN placeholders.
-# This is an AgentCore managed Harness configuration, not Agents Classic.
+# Copy to harness.yaml after replacing the ARN, Region, user-pool,
+# and app-client placeholders. This is an AgentCore managed Harness config.
 harnessName: shadow_hunter_refund_assistant
 executionRoleArn: REPLACE_WITH_HARNESS_EXECUTION_ROLE_ARN
+authorizerType: CUSTOM_JWT
+authorizerConfiguration:
+  customJWTAuthorizer:
+    discoveryUrl: https://cognito-idp.REPLACE_WITH_REGION.amazonaws.com/REPLACE_WITH_USER_POOL_ID/.well-known/openid-configuration
+    allowedClients:
+      - REPLACE_WITH_USER_POOL_APP_CLIENT_ID
 model:
   bedrockModelConfig:
     modelId: global.anthropic.claude-opus-5

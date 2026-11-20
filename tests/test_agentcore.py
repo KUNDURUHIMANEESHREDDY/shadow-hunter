@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from shadow_hunter.agentcore import AgentCoreHarnessClient
+from shadow_hunter.agentcore import AgentCoreHarnessClient, AgentCoreInvocationError
 
 
 class FakeHarnessClient:
@@ -27,6 +27,7 @@ def test_agentcore_harness_client_uses_managed_harness_api():
     )
     result = harness.invoke(
         prompt="Please check my order",
+        bearer_token="eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJjdXN0b21lci0xMjMifQ.signature",
         session_id="session-id-with-at-least-33-characters",
         actor_id="customer-123",
     )
@@ -44,7 +45,12 @@ def test_agentcore_harness_client_rejects_short_session_id():
         client=FakeHarnessClient(),
     )
     try:
-        harness.invoke(prompt="Hello", session_id="short", actor_id="customer-123")
+        harness.invoke(
+            prompt="Hello",
+            bearer_token="eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJjdXN0b21lci0xMjMifQ.signature",
+            session_id="short",
+            actor_id="customer-123",
+        )
     except Exception as exc:
         assert "at least 33 characters" in str(exc)
     else:
@@ -58,8 +64,31 @@ def test_agentcore_harness_client_rejects_session_id_over_100_characters():
         client=FakeHarnessClient(),
     )
     try:
-        harness.invoke(prompt="Hello", session_id="a" * 101, actor_id="customer-123")
+        harness.invoke(
+            prompt="Hello",
+            bearer_token="eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJjdXN0b21lci0xMjMifQ.signature",
+            session_id="a" * 101,
+            actor_id="customer-123",
+        )
     except Exception as exc:
         assert "33–100" in str(exc)
     else:
         raise AssertionError("Overlong session IDs must be rejected")
+
+
+def test_agentcore_harness_client_rejects_opaque_local_tokens():
+    harness = AgentCoreHarnessClient(
+        "arn:aws:bedrock-agentcore:us-east-1:123456789012:harness/demo",
+        "us-east-1",
+        client=FakeHarnessClient(),
+    )
+    try:
+        harness.invoke(
+            prompt="Hello",
+            bearer_token="local-customer-token",
+            actor_id="customer-123",
+        )
+    except AgentCoreInvocationError as exc:
+        assert "JWT access token" in str(exc)
+    else:
+        raise AssertionError("Opaque local tokens must not be forwarded to the Harness")

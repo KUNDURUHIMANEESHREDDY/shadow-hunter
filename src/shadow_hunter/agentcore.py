@@ -1,15 +1,20 @@
 """Amazon Bedrock AgentCore managed-harness client.
 
 This adapter invokes an already-deployed AgentCore Harness. It does not create
-AWS resources. Tool access must be configured on the harness through a
-Gateway whose Policy Engine is attached in ENFORCE mode.
+AWS resources. End-user invocations use a caller-supplied JWT Bearer token;
+SigV4 does not carry per-user identity through the Harness. Tool access must be
+configured through a Gateway whose Policy Engine is attached in ENFORCE mode.
 """
 from __future__ import annotations
 
 import os
 import re
 from typing import Any
+from urllib.parse import urlsplit
 from uuid import uuid4
+
+
+_COMPACT_JWT = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
 
 
 class AgentCoreNotConfigured(RuntimeError):
@@ -28,15 +33,9 @@ class AgentCoreHarnessClient:
             raise AgentCoreNotConfigured("AWS region is required")
         self.harness_arn = harness_arn
         self.region = region
-        if client is None:
-            try:
-                import boto3
-            except ImportError as exc:
-                raise AgentCoreNotConfigured(
-                    "Install the aws optional dependency to use AgentCore"
-                ) from exc
-            client = boto3.client("bedrock-agentcore", region_name=region)
-        self.client = client
+        # Dependency injection is reserved for tests. Production clients are
+        # created per invocation so concurrent users cannot share auth headers.
+        self._injected_client = client
 
     @classmethod
     def from_environment(cls) -> "AgentCoreHarnessClient | None":
@@ -48,16 +47,67 @@ class AgentCoreHarnessClient:
             raise AgentCoreNotConfigured("Set AWS_REGION for the configured harness")
         return cls(harness_arn, region)
 
+    def _create_bearer_client(self, bearer_token: str) -> Any:
+        """Create an unsigned SDK client that sends only the caller's JWT.
+
+        A fresh client and token-bound event handler are used for each request.
+        The handler refuses to send the token to any host other than this
+        Region's AgentCore data-plane endpoint.
+        """
+        try:
+            import boto3
+            from botocore import UNSIGNED
+            from botocore.config import Config
+        except ImportError as exc:
+            raise AgentCoreNotConfigured(
+                "Install the aws optional dependency to use AgentCore"
+            ) from exc
+
+        client = boto3.session.Session().client(
+            "bedrock-agentcore",
+            region_name=self.region,
+            config=Config(signature_version=UNSIGNED),
+        )
+        allowed_hosts = {
+            f"bedrock-agentcore.{self.region}.amazonaws.com",
+            f"bedrock-agentcore.{self.region}.amazonaws.com.cn",
+        }
+
+        def attach_bearer_token(request: Any, **_: Any) -> None:
+            hostname = urlsplit(request.url).hostname
+            if hostname not in allowed_hosts:
+                raise AgentCoreInvocationError(
+                    "Refusing to forward the caller token to an unexpected AgentCore endpoint"
+                )
+            request.headers["Authorization"] = f"Bearer {bearer_token}"
+
+        client.meta.events.register(
+            "before-send.bedrock-agentcore.InvokeHarness",
+            attach_bearer_token,
+        )
+        return client
+
     def invoke(
         self,
         *,
         prompt: str,
+        bearer_token: str,
         session_id: str | None = None,
         actor_id: str,
         trace_id: str | None = None,
     ) -> dict[str, Any]:
         if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 8_000:
             raise AgentCoreInvocationError("Prompt must contain 1–8000 characters")
+        if (
+            not isinstance(bearer_token, str)
+            or _COMPACT_JWT.fullmatch(bearer_token) is None
+        ):
+            raise AgentCoreInvocationError(
+                "A compact OIDC Bearer JWT access token is required for AgentCore Harness invocation"
+            )
+        if not isinstance(actor_id, str) or not 1 <= len(actor_id) <= 128:
+            raise AgentCoreInvocationError("A valid authenticated actor ID is required")
+
         session_id = session_id or f"{uuid4().hex}{uuid4().hex}"
         if (
             not isinstance(session_id, str)
@@ -70,8 +120,11 @@ class AgentCoreHarnessClient:
         trace_id = trace_id or str(uuid4())
         if not isinstance(trace_id, str) or not trace_id or len(trace_id) > 1024:
             raise AgentCoreInvocationError("Invalid AgentCore trace ID")
+
+        owns_client = self._injected_client is None
+        client = self._create_bearer_client(bearer_token) if owns_client else self._injected_client
         try:
-            response = self.client.invoke_harness(
+            response = client.invoke_harness(
                 harnessArn=self.harness_arn,
                 runtimeSessionId=session_id,
                 runtimeUserId=actor_id,
@@ -109,3 +162,6 @@ class AgentCoreHarnessClient:
             raise AgentCoreInvocationError(
                 f"AgentCore invocation failed: {type(exc).__name__}"
             ) from exc
+        finally:
+            if owns_client and client is not None:
+                client.close()

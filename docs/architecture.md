@@ -64,24 +64,19 @@ Audit entries include event type, decision, reason code, actor, tenant, resource
 
 ## AWS managed-agent integration
 
-The event page currently describes a managed Bedrock agent challenge. AWS documentation states that Amazon Bedrock Agents Classic stopped accepting new customers on 30 July 2026 and recommends AgentCore for equivalent managed-agent capabilities. The current implementation therefore targets the AgentCore managed Harness API, with an AgentCore Gateway attached as a Harness tool and a Cedar Policy Engine attached to that Gateway in ENFORCE mode.
+The event page describes a managed Bedrock agent challenge. Shadow Hunter targets the AgentCore managed Harness API, with an AgentCore Gateway attached as a Harness tool and a Cedar Policy Engine attached to that Gateway in ENFORCE mode.
 
-The Harness adapter invokes the deployed Harness through boto3's bedrock-agentcore invoke_harness operation. It sets runtimeUserId and actorId metadata but currently uses SigV4. AWS explicitly documents that SigV4 callers do not propagate per-user identity into downstream tool calls. Before exposing this path to end users, configure a CUSTOM_JWT authorizer on the Harness, invoke with the user's Bearer JWT, and verify AgentCore Identity/Gateway propagation to the application tool boundary. The current adapter is an integration scaffold, not an end-user-ready authenticated chain. It does not create resources. Harness configuration, OpenAPI target schema, and Cedar policy template are under infra/agentcore/.
+The Harness adapter now forwards the authenticated caller's compact JWT access token in the \`Authorization: Bearer\` header. It creates an unsigned Boto3 client per invocation and attaches a token-scoped \`before-send\` handler restricted to the regional AgentCore data-plane hostname; this avoids SigV4 and avoids sharing bearer headers across concurrent users. The checked-in Harness template configures a \`CUSTOM_JWT\` authorizer with the Cognito discovery URL and allowed app client. AWS documents that SigV4 does not propagate per-user identity, while inbound OAuth does.
 
-The Cedar policy is an outer allowlist for the three read/request tools. It does not replace application checks for customer identity, tenant ownership, eligibility, remaining balance, idempotency, or human approval. The Gateway must use a production authorizer; the AWS tutorial's NONE authorizer is not suitable for deployment.
+The Harness-to-Gateway hop still uses its execution role. For the Gateway-to-API target hop, configure AgentCore Identity on-behalf-of \`TOKEN_EXCHANGE\` rather than forwarding the original JWT or using a shared gateway role. Cognito supports RFC 8693 token exchange on Essentials and Plus plans. The example target credential configuration is under \`infra/agentcore/gateway-target-oauth.example.json\`.
 
-Official references:
-- https://docs.aws.amazon.com/bedrock/latest/userguide/agents-classic-maintenance-mode.html
-- https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness.html
-- https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-tools.html
-- https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy-getting-started.html
-- https://docs.aws.amazon.com/bedrock-agentcore/latest/APIReference/API_InvokeHarness.html
+This is a first identity-propagation slice, not a completed production identity chain. The FastAPI app still authenticates using the environment-backed local token map; it does not yet verify Cognito or derived OBO JWT signatures, audiences, scopes, or actor claims. That JWT-verifier and trusted-claim mapping is the next implementation task. No AWS resources have been created or deployed. Harness, Gateway, target credential-provider, and Cedar configuration examples remain templates.
 
 ## Authentication
 
-The current environment-backed token map is a local development adapter. It compares opaque bearer tokens and resolves trusted principal attributes from server-side environment configuration. It is not Cognito integration and must not be used as the production identity provider.
+The current environment-backed token map is a local development adapter. It compares opaque bearer tokens and resolves trusted principal attributes from server-side environment configuration. It is not Cognito integration and must not be used as the production identity provider. The Harness adapter only forwards compact JWT-shaped credentials; AgentCore validates the token against the configured Harness authorizer. The application itself still needs a JWT verifier for Cognito-derived OBO tokens.
 
-Production deployment must validate user JWTs at API Gateway/Cognito or an equivalent authorizer and pass verified claims to the application. Do not accept tenant/customer identity from user prompts, Harness tool arguments, or unsigned headers.
+Production deployment must validate the original user JWT at the customer API boundary and validate the derived OBO JWT at the tool API boundary. Verify signature, issuer, expiry, audience, required scopes, subject, and the expected actor claim before constructing the existing Principal. Do not accept tenant/customer identity from user prompts, Harness tool arguments, or unsigned headers.
 
 ## Data and deployment status
 

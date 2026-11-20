@@ -1,0 +1,16 @@
+{
+  "credentialProviderType": "OAUTH",
+  "credentialProvider": {
+    "oauthCredentialProvider": {
+      "providerArn": "REPLACE_WITH_AGENTCORE_IDENTITY_OBO_CREDENTIAL_PROVIDER_ARN",
+      "grantType": "TOKEN_EXCHANGE",
+      "scopes": [
+        "shadow-hunter-api/refunds"
+      ],
+      "customParameters": {
+        "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
+        "audience": "shadow-hunter-api"
+      }
+    }
+  }
+}
