@@ -1,11 +1,24 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Shadow Hunter transactional single-table DynamoDB store.
+Transform: AWS::Serverless-2016-10-31
+Description: Shadow Hunter transactional data store and S3 Object Lock audit archive.
+
 Parameters:
   Environment:
     Type: String
     Default: production
     AllowedValues: [development, staging, production]
     Description: Selects the table name and deletion-protection behavior.
+  AuditRetentionDays:
+    Type: Number
+    Default: 365
+    MinValue: 1
+    MaxValue: 36500
+    Description: Default S3 Object Lock retention duration in days.
+  AuditRetentionMode:
+    Type: String
+    Default: GOVERNANCE
+    AllowedValues: [GOVERNANCE, COMPLIANCE]
+    Description: COMPLIANCE cannot be shortened or bypassed before expiry.
 
 Resources:
   ShadowHunterDataTable:
@@ -42,6 +55,8 @@ Resources:
         SSEEnabled: true
         SSEType: KMS
         KMSMasterKeyId: alias/aws/dynamodb
+      StreamSpecification:
+        StreamViewType: NEW_IMAGE
       TimeToLiveSpecification:
         AttributeName: ttl_epoch
         Enabled: true
@@ -55,10 +70,194 @@ Resources:
         - Key: Environment
           Value: !Ref Environment
 
+  ShadowHunterAuditArchive:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub shadow-hunter-audit-${AWS::AccountId}-${AWS::Region}-${Environment}
+      ObjectLockEnabled: true
+      ObjectLockConfiguration:
+        ObjectLockEnabled: Enabled
+        Rule:
+          DefaultRetention:
+            Mode: !Ref AuditRetentionMode
+            Days: !Ref AuditRetentionDays
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Application
+          Value: ShadowHunter
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: DataClass
+          Value: AuditEvidence
+
+  ShadowHunterAuditArchivePolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ShadowHunterAuditArchive
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !GetAtt ShadowHunterAuditArchive.Arn
+              - !Sub '${ShadowHunterAuditArchive.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+          - Sid: DenyNonConditionalAuditWrites
+            Effect: Deny
+            Principal: '*'
+            Action: s3:PutObject
+            Resource: !Sub '${ShadowHunterAuditArchive.Arn}/audit-events/*'
+            Condition:
+              Null:
+                s3:if-none-match: true
+
+  ShadowHunterAuditExportDlq:
+    Type: AWS::SQS::Queue
+    DeletionPolicy: Retain
+    Properties:
+      QueueName: !Sub shadow-hunter-audit-export-dlq-${Environment}
+      MessageRetentionPeriod: 1209600
+      VisibilityTimeout: 180
+      SqsManagedSseEnabled: true
+      Tags:
+        - Key: Application
+          Value: ShadowHunter
+        - Key: Environment
+          Value: !Ref Environment
+
+  ShadowHunterAuditExporterLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    Properties:
+      LogGroupName: !Sub /aws/lambda/shadow-hunter-audit-exporter-${Environment}
+      RetentionInDays: 30
+
+  ShadowHunterAuditExporterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ShadowHunterAuditExportOnly
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadAuditStream
+                Effect: Allow
+                Action:
+                  - dynamodb:DescribeStream
+                  - dynamodb:GetRecords
+                  - dynamodb:GetShardIterator
+                Resource: !GetAtt ShadowHunterDataTable.StreamArn
+              - Sid: ListDynamoStreams
+                Effect: Allow
+                Action:
+                  - dynamodb:ListStreams
+                Resource: '*'
+              - Sid: WriteAuditArchivePrefix
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource: !Sub '${ShadowHunterAuditArchive.Arn}/audit-events/*'
+              - Sid: SendFailedBatchesToDlq
+                Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !GetAtt ShadowHunterAuditExportDlq.Arn
+
+  ShadowHunterAuditExporter:
+    Type: AWS::Serverless::Function
+    DependsOn:
+      - ShadowHunterAuditExporterLogGroup
+      - ShadowHunterAuditArchivePolicy
+    Properties:
+      FunctionName: !Sub shadow-hunter-audit-exporter-${Environment}
+      CodeUri: ../../src/shadow_hunter/
+      Handler: audit_exporter.handler
+      Runtime: python3.12
+      MemorySize: 256
+      Timeout: 30
+      ReservedConcurrentExecutions: 2
+      Role: !GetAtt ShadowHunterAuditExporterRole.Arn
+      Environment:
+        Variables:
+          SHADOW_HUNTER_AUDIT_BUCKET: !Ref ShadowHunterAuditArchive
+          SHADOW_HUNTER_AUDIT_PREFIX: audit-events
+
+  ShadowHunterAuditExportMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt ShadowHunterDataTable.StreamArn
+      FunctionName: !GetAtt ShadowHunterAuditExporter.Arn
+      StartingPosition: TRIM_HORIZON
+      BatchSize: 100
+      MaximumBatchingWindowInSeconds: 1
+      MaximumRecordAgeInSeconds: 86400
+      MaximumRetryAttempts: 10
+      BisectBatchOnFunctionError: true
+      FunctionResponseTypes:
+        - ReportBatchItemFailures
+      DestinationConfig:
+        OnFailure:
+          Destination: !GetAtt ShadowHunterAuditExportDlq.Arn
+
+  ShadowHunterAuditExportDlqAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub shadow-hunter-audit-export-dlq-${Environment}
+      AlarmDescription: One or more audit export stream batches require operator redrive.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt ShadowHunterAuditExportDlq.QueueName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
 Outputs:
   TableName:
     Description: Set SHADOW_HUNTER_DYNAMODB_TABLE to this value.
     Value: !Ref ShadowHunterDataTable
   TableArn:
-    Description: Scope the application task role to this table and its GSI.
+    Description: Scope the application runtime to this table and its GSI.
     Value: !GetAtt ShadowHunterDataTable.Arn
+  AuditArchiveBucketName:
+    Description: Bucket receiving S3 Object Lock audit records.
+    Value: !Ref ShadowHunterAuditArchive
+  AuditArchiveBucketArn:
+    Description: Separate audit exporter role writes only to audit-events/.
+    Value: !GetAtt ShadowHunterAuditArchive.Arn
+  AuditExportDlqUrl:
+    Description: Inspect and redrive failed DynamoDB stream export batches.
+    Value: !Ref ShadowHunterAuditExportDlq
