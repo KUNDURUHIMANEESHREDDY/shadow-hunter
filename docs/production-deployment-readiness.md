@@ -104,7 +104,7 @@ The data template's exporter only sees DynamoDB Stream records emitted after the
 
 DynamoDB Streams retains source records for 24 hours. The SQS DLQ retains failure metadata for 14 days, but this does not extend the source-stream retention window. Reconcile and replay failures before that source window expires.
 
-The existing `shadow-hunter-audit-reconcile` command verifies **key coverage only**: it compares AUDIT GSI event identities with S3 object keys and does not read archived object bodies. It is useful for completeness checks, not a content-integrity proof. For the final demo, use a separate read-only audit-verifier identity with only GSI query and S3 GetObject access (policy example: `infra/data/audit-verification-policy.example.json`). Retrieve the DynamoDB event and corresponding S3 JSON object independently; compare `event_id`, `trace_id`, `request_id`, decision, reason code, actor, tenant, resource, action digest, and policy version. Do not grant this verifier PutObject, DeleteObject, retention-bypass, queue-delete, or application-write permissions.
+The existing `shadow-hunter-audit-reconcile` command verifies **key coverage only**: it compares AUDIT GSI event identities with S3 object keys and does not read archived object bodies. A separate `shadow-hunter-audit-verify` command is now authored for content verification. It uses a separate read-only auditor identity (policy example: `infra/data/audit-verification-policy.example.json`), reads the allowlisted source audit row and matching S3 object, compares exact canonical JSON bytes, and emits SHA-256 hashes/mismatch status without printing payloads. Run key reconciliation as well to detect orphan objects. Neither command has been run against AWS yet. Do not grant the verifier PutObject, DeleteObject, retention-bypass, queue-delete, or application-write permissions.
 
 ### 5. Public API and runtime boundaries
 
@@ -164,7 +164,7 @@ Expected result:
 1. FastAPI returns `decision=DENY` and reason `RESOURCE_OWNER_MISMATCH`; no order data is returned and no refund state changes.
 2. The response's `trace_id` and `request_id` identify a `POLICY_DECISION` denial in the authenticated operator trace endpoint.
 3. The independent audit verifier reads the matching AUDIT item from the DynamoDB GSI and reads the deterministic S3 object under `audit-events/YYYY/MM/DD/<event_id>.json` using its read-only role.
-4. The verifier confirms the archived event fields match the source audit event and records object key and SHA-256 hashes in a redacted evidence report. It must not mutate either store.
+4. The verifier confirms the archived JSON bytes match the canonical source event projection and records object keys and SHA-256 hashes in a redacted evidence report. It must not mutate either store.
 5. Repeat with an unregistered agent tool to demonstrate the application default-deny path. Do not use the outer Cedar denial as the only audited example because a Gateway-side rejection may never reach the application's audit store.
 
 Only report the demonstration as passed after recording the actual HTTP response, correlated audit trace, archive object, and independent read-only comparison. The current code has not demonstrated this in AWS.

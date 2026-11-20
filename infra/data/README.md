@@ -222,16 +222,25 @@ operations use point reads, indexed queries, puts, updates, and transactions.
 - The production table and archive are not provisioned by this repository change.
 
 
+
 ## Independent read-only archive verification
 
-The key-reconciliation command above does not read object bodies. For the production evidence demo, use a separate auditor identity described by
-`audit-verification-policy.example.json`. It is deliberately separate from
-the exporter and DLQ replay roles.
+The key-reconciliation command above checks missing/orphan object keys but does
+not read object bodies. The separate `shadow-hunter-audit-verify` command
+checks content by querying source audit rows through GSI1 and fetching the
+corresponding S3 object bodies. It compares exact canonical allowlisted and
+redacted JSON bytes, and reports only object keys, event/trace IDs, SHA-256
+hashes, and mismatch status.
 
-The verifier needs only `dynamodb:Query` on the AUDIT GSI and
-`s3:GetObject` on `audit-events/*`. It must not receive PutObject,
-DeleteObject, queue-consume, table-write, Object Lock retention, or Governance
-bypass permissions. Use it to retrieve the source audit row and the matching
-deterministic S3 JSON object, then compare the event identity and decision
-fields. Keep the comparison output limited to event IDs, trace/request IDs,
-object keys, hashes, and mismatch status; do not print full audit payloads.
+Run it with the dedicated auditor role:
+
+    shadow-hunter-audit-verify --table-name shadow-hunter-production --bucket <archive-bucket> --prefix audit-events --region <region> --trace-id <trace-id> --report-file audit-verification.json
+
+Omit `--trace-id` to verify every visible audit row. The role requires only
+`dynamodb:Query` on the AUDIT GSI and `s3:GetObject` on
+`audit-events/*`, as shown in `audit-verification-policy.example.json`.
+It does not enumerate S3 keys or detect orphan objects; run
+`shadow-hunter-audit-reconcile` separately for missing/orphan key comparison.
+Because GSI1 is eventually consistent, run after the exporter catches up and
+repeat if the requested trace is not visible. The content verifier is authored
+but has not been run against AWS.

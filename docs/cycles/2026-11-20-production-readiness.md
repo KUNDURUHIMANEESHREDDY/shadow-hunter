@@ -25,6 +25,7 @@
 
 - Added `docs/production-deployment-readiness.md`.
 - Added `infra/data/audit-verification-policy.example.json`.
+- Added `src/shadow_hunter/audit_verify.py`, its unexecuted tests, and the `shadow-hunter-audit-verify` console entrypoint.
 - Updated `infra/data/README.md` with the separate auditor role boundary.
 - Updated `infra/agentcore/README.md` to consistently require V3_0 and a separate operator client.
 - Updated the README deployment-readiness status.
