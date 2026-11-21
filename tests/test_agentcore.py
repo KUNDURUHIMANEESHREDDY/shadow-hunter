@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from shadow_hunter.agentcore import AgentCoreHarnessClient, AgentCoreInvocationError
 
 
@@ -44,17 +46,13 @@ def test_agentcore_harness_client_rejects_short_session_id():
         "us-east-1",
         client=FakeHarnessClient(),
     )
-    try:
+    with pytest.raises(AgentCoreInvocationError, match="session IDs must be 33"):
         harness.invoke(
             prompt="Hello",
             bearer_token="eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJjdXN0b21lci0xMjMifQ.signature",
             session_id="short",
             actor_id="customer-123",
         )
-    except Exception as exc:
-        assert "at least 33 characters" in str(exc)
-    else:
-        raise AssertionError("Short session IDs must be rejected")
 
 
 def test_agentcore_harness_client_rejects_session_id_over_100_characters():
@@ -63,17 +61,13 @@ def test_agentcore_harness_client_rejects_session_id_over_100_characters():
         "us-east-1",
         client=FakeHarnessClient(),
     )
-    try:
+    with pytest.raises(AgentCoreInvocationError, match="session IDs must be 33"):
         harness.invoke(
             prompt="Hello",
             bearer_token="eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJjdXN0b21lci0xMjMifQ.signature",
             session_id="a" * 101,
             actor_id="customer-123",
         )
-    except Exception as exc:
-        assert "33–100" in str(exc)
-    else:
-        raise AssertionError("Overlong session IDs must be rejected")
 
 
 def test_agentcore_harness_client_rejects_opaque_local_tokens():

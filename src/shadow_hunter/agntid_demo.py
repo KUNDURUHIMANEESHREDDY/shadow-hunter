@@ -8,15 +8,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import http.client
 import json
 import os
 import re
 import sys
-import urllib.error
-import urllib.request
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
 READ_ONLY_TOOLS = frozenset({"get_order", "check_refund_eligibility"})
@@ -44,6 +43,28 @@ def _endpoint_label(url: str) -> str:
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise DemoConfigurationError("AGNTID_MCP_URL must be an absolute HTTP(S) URL")
     return f"{parsed.scheme}://{parsed.hostname}{port}{parsed.path}"
+
+
+def _ollama_base_url(url: str) -> str:
+    if not url or url != url.strip() or any(ord(char) < 32 for char in url):
+        raise DemoConfigurationError("OLLAMA_BASE_URL must be a valid absolute HTTP(S) URL")
+    try:
+        parsed = urlsplit(url)
+        port = parsed.port
+    except ValueError as exc:
+        raise DemoConfigurationError("OLLAMA_BASE_URL contains an invalid port") from exc
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise DemoConfigurationError("OLLAMA_BASE_URL must be an absolute HTTP(S) URL")
+    if parsed.username is not None or parsed.password is not None:
+        raise DemoConfigurationError("OLLAMA_BASE_URL must not contain embedded credentials")
+    if parsed.query or parsed.fragment:
+        raise DemoConfigurationError("OLLAMA_BASE_URL must not contain a query or fragment")
+
+    hostname = parsed.hostname
+    if ":" in hostname:
+        hostname = f"[{hostname}]"
+    netloc = f"{hostname}:{port}" if port is not None else hostname
+    return urlunsplit((parsed.scheme, netloc, parsed.path.rstrip("/"), "", ""))
 
 
 def _headers(run_id: str) -> dict[str, str]:
@@ -77,6 +98,7 @@ def _ollama_chat(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    base_url = _ollama_base_url(base_url)
     payload = {
         "model": model,
         "messages": messages,
@@ -84,17 +106,27 @@ def _ollama_chat(
         "stream": False,
         "options": {"temperature": 0},
     }
-    request = urllib.request.Request(
-        f"{base_url.rstrip('/')}/api/chat",
-        data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
+    parsed = urlsplit(base_url)
+    connection_type = (
+        http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
     )
+    connection = connection_type(parsed.hostname, parsed.port, timeout=180)
+    request_path = f"{parsed.path.rstrip('/')}/api/chat"
     try:
-        with urllib.request.urlopen(request, timeout=180) as response:
-            data = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        connection.request(
+            "POST",
+            request_path,
+            body=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        response = connection.getresponse()
+        if response.status >= 400:
+            raise RuntimeError(f"Ollama request failed (HTTP {response.status})")
+        data = json.loads(response.read().decode("utf-8"))
+    except (http.client.HTTPException, OSError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"Ollama request failed ({type(exc).__name__})") from exc
+    finally:
+        connection.close()
     message = data.get("message")
     if not isinstance(message, dict):
         raise RuntimeError("Ollama response did not contain a message")
@@ -144,7 +176,9 @@ async def _run(output_path: str | None) -> dict[str, Any]:
     mcp_url = _required_env("AGNTID_MCP_URL")
     endpoint = _endpoint_label(mcp_url)
     model = _required_env("OLLAMA_MODEL")
-    ollama_url = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+    ollama_url = _ollama_base_url(
+        os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+    )
     order_id = os.environ.get("AGNTID_DEMO_ORDER_ID", "order-demo-001").strip()
     if os.environ.get("AGNTID_DEMO_SANDBOX", "").lower() != "true":
         raise DemoConfigurationError("Set AGNTID_DEMO_SANDBOX=true before enabling the write probe")

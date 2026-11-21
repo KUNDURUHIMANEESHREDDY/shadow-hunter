@@ -74,6 +74,7 @@ Resources:
     Type: AWS::SecretsManager::Secret
     Condition: CreateNvidiaApiKeySecret
     DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       Name: !Sub 'shadow-hunter/${Environment}/nvidia-api-key'
       Description: Shadow Hunter NVIDIA NIM provider API key. Managed through the operator console.
@@ -83,6 +84,7 @@ Resources:
     Type: AWS::SecretsManager::Secret
     Condition: CreateA2AKeysSecret
     DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       Name: !Sub 'shadow-hunter/${Environment}/a2a-agent-keys'
       Description: Distinct Shadow Hunter Red and Blue agent HMAC signing keys. Managed through the operator console.
@@ -92,6 +94,7 @@ Resources:
   ShadowHunterLambdaLogs:
     Type: AWS::Logs::LogGroup
     DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       LogGroupName: !Sub '/aws/lambda/shadow-hunter-api-${Environment}'
       RetentionInDays: 30
@@ -99,6 +102,7 @@ Resources:
   ShadowHunterHttpApiLogs:
     Type: AWS::Logs::LogGroup
     DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       LogGroupName: !Sub '/aws/apigateway/shadow-hunter-${Environment}'
       RetentionInDays: 30

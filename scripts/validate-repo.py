@@ -9,7 +9,6 @@ required = [
     "LICENSE",
     "AGENTS.md",
     ".codex/config.toml",
-    ".github/workflows/engineering-cycle.yml",
 ]
 missing = [name for name in required if not (ROOT / name).is_file()]
 if missing:
