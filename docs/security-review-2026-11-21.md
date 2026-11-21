@@ -116,7 +116,7 @@ Send Content-Security-Policy: frame-ancestors 'none' (or the exact approved ance
 - **Severity:** LOW
 - **Confidence:** HIGH
 - **Status:** Open
-- **Affected paths:** [agentcore.py](../src/shadow_hunter/agentcore.py#L146), [api.py](../src/shadow_hunter/api.py#L345)
+- **Affected paths:** [agentcore.py](../src/shadow_hunter/agentcore.py#L146), [api.py](../src/shadow_hunter/api.py#L285)
 
 **Evidence**
 
