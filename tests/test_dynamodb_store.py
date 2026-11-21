@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from datetime import timedelta
+
 import pytest
 
 from shadow_hunter.dynamodb_store import DynamoDBStore
-from shadow_hunter.store import StoreError
+from shadow_hunter.store import StoreError, utc_now
 
 
 def test_dynamodb_backend_requires_explicit_table_name(monkeypatch):
@@ -80,3 +82,71 @@ def test_dynamodb_a2a_nonce_claim_rejects_existing_unexpired_nonce():
     )
 
     assert accepted is False
+
+
+class _FakeTransactClient:
+    def __init__(self):
+        self.calls = []
+
+    def transact_write_items(self, **kwargs):
+        self.calls.append(kwargs)
+
+
+def _fake_pending_approval_store(principal_id: str):
+    store = object.__new__(DynamoDBStore)
+    store.table_name = "shadow-hunter-tests"
+    store._client = _FakeTransactClient()
+    approval = {
+        "PK": "APPROVAL#approval-1",
+        "SK": "META",
+        "approval_id": "approval-1",
+        "refund_request_id": "refund-1",
+        "trace_id": "trace-1",
+        "request_id": "request-1",
+        "tenant_id": "tenant-1",
+        "principal_id": principal_id,
+        "action_digest": "action-digest",
+        "policy_id": "support-refund-baseline",
+        "policy_version": "0.1.0",
+        "expires_at": (utc_now() + timedelta(minutes=10)).isoformat(
+            timespec="microseconds"
+        ),
+        "status": "PENDING",
+    }
+    audit_attempts = []
+    store._get_item = lambda *_args, **_kwargs: dict(approval)
+    store._audit_item = lambda **kwargs: dict(kwargs)
+    store._tx_update = lambda key, **kwargs: {
+        "Update": {"Key": dict(key), **kwargs}
+    }
+    store._tx_put = lambda item: {"Put": dict(item)}
+    store._stats_tx = lambda deltas: {"Stats": dict(deltas)}
+    store.audit_attempts = audit_attempts
+    store.append_audit = lambda **kwargs: audit_attempts.append(dict(kwargs))
+    return store, approval
+
+
+def test_dynamodb_rejects_self_approval_and_records_denial():
+    store, _ = _fake_pending_approval_store("requesting-operator")
+
+    with pytest.raises(StoreError, match="cannot approve their own"):
+        store.approve("approval-1", "requesting-operator")
+
+    assert store._client.calls == []
+    assert len(store.audit_attempts) == 1
+    assert store.audit_attempts[0]["event_type"] == "APPROVAL_SELF_APPROVAL_BLOCKED"
+    assert store.audit_attempts[0]["decision"] == "DENY"
+    assert store.audit_attempts[0]["reason_code"] == "MAKER_CHECKER_VIOLATION"
+
+
+def test_dynamodb_approval_condition_requires_a_different_principal():
+    store, _ = _fake_pending_approval_store("requesting-customer")
+
+    token = store.approve("approval-1", "independent-operator")
+
+    assert token
+    assert len(store._client.calls) == 1
+    update = store._client.calls[0]["TransactItems"][0]["Update"]
+    assert "principal_id <> :approver" in update["condition_expression"]
+    assert update["values"][":approver"] == "independent-operator"
+    assert store.audit_attempts == []

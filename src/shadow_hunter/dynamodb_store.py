@@ -419,9 +419,28 @@ class DynamoDBStore:
             # A concurrent approver/rejector may already have moved the state.
             pass
 
+    def _record_self_approval_blocked(
+        self, approval: Mapping[str, Any], approver_id: str
+    ) -> None:
+        self.append_audit(
+            event_type="APPROVAL_SELF_APPROVAL_BLOCKED",
+            trace_id=approval.get("trace_id") or approval["refund_request_id"],
+            request_id=approval.get("request_id") or approval["refund_request_id"],
+            decision="DENY",
+            reason_code="MAKER_CHECKER_VIOLATION",
+            actor_id=approver_id,
+            tenant_id=approval.get("tenant_id"),
+            resource_id=approval["refund_request_id"],
+            action_digest=approval.get("action_digest"),
+            policy_id=approval.get("policy_id"),
+            policy_version=approval.get("policy_version"),
+            details={
+                "approval_id": approval["approval_id"],
+                "refund_request_id": approval["refund_request_id"],
+            },
+        )
+
     def approve(self, approval_id: str, approver_id: str) -> str:
-        raw_token = secrets.token_urlsafe(32)
-        token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
         approval = self._get_item(f"APPROVAL#{approval_id}")
         if approval is None:
             raise StoreError("Approval not found")
@@ -430,7 +449,15 @@ class DynamoDBStore:
         if approval.get("expires_at", "") <= iso_now():
             self._mark_expired(approval)
             raise StoreError("Approval has expired")
+        requester_id = approval.get("principal_id")
+        if isinstance(requester_id, str) and secrets.compare_digest(
+            requester_id, approver_id
+        ):
+            self._record_self_approval_blocked(approval, approver_id)
+            raise StoreError("Requesting principal cannot approve their own refund")
 
+        raw_token = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
         now = iso_now()
         event = self._audit_item(
             event_type="APPROVAL_GRANTED",
@@ -451,7 +478,10 @@ class DynamoDBStore:
                     "SET #status = :approved, approver_id = :approver, "
                     "approved_at = :now, token_hash = :token_hash"
                 ),
-                condition_expression="#status = :pending AND expires_at > :now",
+                condition_expression=(
+                    "#status = :pending AND expires_at > :now "
+                    "AND principal_id <> :approver"
+                ),
                 names={"#status": "status"},
                 values={
                     ":approved": "APPROVED",
@@ -476,6 +506,14 @@ class DynamoDBStore:
                 if latest.get("expires_at", "") <= iso_now():
                     self._mark_expired(latest)
                     raise StoreError("Approval has expired") from exc
+                latest_requester = latest.get("principal_id")
+                if isinstance(latest_requester, str) and secrets.compare_digest(
+                    latest_requester, approver_id
+                ):
+                    self._record_self_approval_blocked(latest, approver_id)
+                    raise StoreError(
+                        "Requesting principal cannot approve their own refund"
+                    ) from exc
             raise StoreError("Approval is no longer pending or has expired") from exc
         return raw_token
 
@@ -609,6 +647,15 @@ class DynamoDBStore:
 
         if approval.get("status") != "APPROVED":
             raise StoreError("Refund execution requires an unused approved capability")
+        requester_id = approval.get("principal_id")
+        approver_id = approval.get("approver_id")
+        if (
+            not isinstance(requester_id, str)
+            or not isinstance(approver_id, str)
+            or not approver_id
+            or secrets.compare_digest(requester_id, approver_id)
+        ):
+            raise StoreError("Approval violates maker-checker separation")
         if approval.get("policy_id") != policy_id or approval.get("policy_version") != policy_version:
             raise StoreError("Policy changed after approval; a new approval is required")
         if approval.get("expires_at", "") <= iso_now():
@@ -701,7 +748,8 @@ class DynamoDBStore:
                 condition_expression=(
                     "#status = :approved AND token_hash = :token "
                     "AND expires_at > :now AND action_digest = :digest "
-                    "AND principal_id = :principal AND policy_version = :stored_policy"
+                    "AND principal_id = :principal AND approver_id <> :principal "
+                    "AND policy_version = :stored_policy"
                 ),
                 names={"#status": "status"},
                 values={

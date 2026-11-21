@@ -352,10 +352,10 @@ class SQLiteStore:
             return approval_id
 
     def approve(self, approval_id: str, approver_id: str) -> str:
-        """Approve once and return a random capability token exactly once."""
-        raw_token = secrets.token_urlsafe(32)
-        token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+        """Approve once; only a principal other than the requester may approve."""
+        raw_token: str | None = None
         expired = False
+        self_approval_blocked = False
         with self._transaction() as conn:
             row = conn.execute(
                 "SELECT * FROM approvals WHERE approval_id = ?", (approval_id,)
@@ -370,15 +370,43 @@ class SQLiteStore:
                     (approval_id,),
                 )
                 expired = True
+            elif secrets.compare_digest(str(row["principal_id"]), approver_id):
+                self._insert_audit(
+                    conn,
+                    event_type="APPROVAL_SELF_APPROVAL_BLOCKED",
+                    decision="DENY",
+                    reason_code="MAKER_CHECKER_VIOLATION",
+                    trace_id=row["trace_id"] or row["refund_request_id"],
+                    request_id=row["request_id"] or row["refund_request_id"],
+                    actor_id=approver_id,
+                    tenant_id=row["tenant_id"],
+                    resource_id=row["refund_request_id"],
+                    action_digest=row["action_digest"],
+                    policy_id=row["policy_id"],
+                    policy_version=row["policy_version"],
+                    details={
+                        "approval_id": approval_id,
+                        "refund_request_id": row["refund_request_id"],
+                    },
+                )
+                self_approval_blocked = True
             else:
-                conn.execute(
+                raw_token = secrets.token_urlsafe(32)
+                token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+                updated = conn.execute(
                     """
                     UPDATE approvals SET
-                        status = 'APPROVED', approver_id = ?, approved_at = ?, token_hash = ?
+                        status = 'APPROVED', approver_id = ?, approved_at = ?,
+                        token_hash = ?
                     WHERE approval_id = ? AND status = 'PENDING'
+                      AND principal_id <> ?
                     """,
-                    (approver_id, iso_now(), token_hash, approval_id),
+                    (approver_id, iso_now(), token_hash, approval_id, approver_id),
                 )
+                if updated.rowcount != 1:
+                    raise StoreError(
+                        "Approval is no longer pending or requester cannot approve"
+                    )
                 self._insert_audit(
                     conn,
                     event_type="APPROVAL_GRANTED",
@@ -394,6 +422,10 @@ class SQLiteStore:
                 )
         if expired:
             raise StoreError("Approval has expired")
+        if self_approval_blocked:
+            raise StoreError("Requesting principal cannot approve their own refund")
+        if raw_token is None:
+            raise StoreError("Approval did not issue a capability token")
         return raw_token
 
     def reject(self, approval_id: str, approver_id: str, reason: str) -> None:
@@ -489,6 +521,15 @@ class SQLiteStore:
 
             if approval["status"] != "APPROVED":
                 raise StoreError("Refund execution requires an unused approved capability")
+            requester_id = approval["principal_id"]
+            approver_id = approval["approver_id"]
+            if (
+                not isinstance(requester_id, str)
+                or not isinstance(approver_id, str)
+                or not approver_id
+                or secrets.compare_digest(requester_id, approver_id)
+            ):
+                raise StoreError("Approval violates maker-checker separation")
             if (
                 approval["policy_id"] != policy_id
                 or approval["policy_version"] != policy_version
@@ -545,15 +586,18 @@ class SQLiteStore:
                 """,
                 (executed_at, operator_id, refund_request_id),
             )
-            conn.execute(
+            consumed = conn.execute(
                 """
                 UPDATE approvals
                 SET status = 'CONSUMED', consumed_token_hash = token_hash,
                     consumed_at = ?, token_hash = NULL
                 WHERE approval_id = ? AND status = 'APPROVED'
+                  AND approver_id <> principal_id
                 """,
                 (executed_at, approval["approval_id"]),
             )
+            if consumed.rowcount != 1:
+                raise StoreError("Approval violates maker-checker separation")
             self._insert_audit(
                 conn,
                 event_type="REFUND_EXECUTED",

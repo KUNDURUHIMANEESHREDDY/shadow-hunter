@@ -59,21 +59,21 @@ Regression tests exercise nonexistent, cross-tenant, and cross-customer order ID
 ### SH-SEC-002 — Approval does not enforce separation of duties
 
 - **Severity:** MEDIUM
-- **Confidence:** HIGH for the missing code invariant; exploitability depends on identity/group configuration
-- **Status:** Open
-- **Affected paths:** [approvals.py](../src/shadow_hunter/approvals.py#L30), [store.py](../src/shadow_hunter/store.py#L354), [dynamodb_store.py](../src/shadow_hunter/dynamodb_store.py#L422), [api.py](../src/shadow_hunter/api.py#L384)
+- **Confidence:** HIGH for the original missing invariant; identity overlap remains a deployment configuration concern
+- **Status:** Remediated in local SQLite/DynamoDB source and regression-tested; live DynamoDB staging verification remains pending.
+- **Affected paths:** [approvals.py](../src/shadow_hunter/approvals.py#L30), [store.py](../src/shadow_hunter/store.py), [dynamodb_store.py](../src/shadow_hunter/dynamodb_store.py), [api.py](../src/shadow_hunter/api.py#L384)
 
-**Evidence**
+**Original evidence**
 
-The approval service checks that an approver ID is non-empty. The SQLite and DynamoDB approval transitions store the approver identity but do not compare it with the refund request's originating principal_id. Cognito requires an operator client ID and operator group, but one Cognito subject can potentially be provisioned as both a customer and an operator.
+The approval service checked that an approver ID was non-empty. The SQLite and DynamoDB approval transitions stored the approver identity but did not compare it with the refund request's originating principal_id. Cognito requires an operator client ID and operator group, but one Cognito subject can potentially be provisioned as both a customer and an operator.
 
-**Impact and precondition**
+**Remediation applied**
 
-Where policy or business rules require a second person to approve a customer's refund, an identity holding both customer and operator privileges can approve its own request. The current code does not enforce a maker-checker invariant.
+Both persistence adapters now prohibit an approver whose authenticated subject matches the stored requester principal. SQLite performs the comparison inside its `BEGIN IMMEDIATE` approval transaction and adds `principal_id <> approver_id` to the state update. DynamoDB checks the subject before issuing a capability and repeats the inequality in the conditional `TransactWriteItems` approval update. Both paths record `APPROVAL_SELF_APPROVAL_BLOCKED` with DENY / `MAKER_CHECKER_VIOLATION` while leaving the approval pending.
 
-**Recommended remediation**
+Refund execution also re-checks the stored requester and approver in both adapters. SQLite validates before the ledger mutation and constrains the approval-consume update; DynamoDB validates the loaded record and includes `approver_id <> principal_id` in the atomic consume condition. This prevents legacy or mutated self-approved records from authorizing a new debit.
 
-Decide and document whether self-approval is prohibited. For a maker-checker policy, compare the authenticated operator subject with the refund request's originating principal in the authoritative persistence transition, not only in the UI. Enforce the same invariant in SQLite and DynamoDB and add negative tests for same-subject approval and positive tests for an independent operator.
+Regression tests prove same-subject denial, pending-state preservation, denial audit evidence, independent-operator approval, and rejection of a legacy self-approved SQLite record. DynamoDB approval tests use a fake transaction client to inspect the conditional write; live DynamoDB behavior remains unverified.
 
 ### SH-SEC-003 — One-time approval capability is lost on page refresh
 
@@ -189,7 +189,7 @@ These source observations are positive design controls, not proof that the deplo
 | ID | Required evidence before release | Suggested verification |
 |---|---|---|
 | SH-SEC-001 | No customer-visible order-existence oracle | Local HTTP/MCP regression tests pass for nonexistent, cross-tenant, and cross-customer IDs; staging verification remains pending |
-| SH-SEC-002 | Maker-checker invariant or documented policy exception | SQLite and DynamoDB tests for same-subject deny and independent-operator allow |
+| SH-SEC-002 | Maker-checker invariant or documented policy exception | Local SQLite tests and DynamoDB transaction-contract tests pass; verify the conditional transitions against live DynamoDB in staging |
 | SH-SEC-003 | Recoverable, auditable one-time approval workflow | Browser test for reload, lost response, token rotation, one-time consumption, and replay |
 | SH-SEC-004 | Operator page cannot be framed by unapproved origins | HTTP header assertions and cross-origin iframe test |
 | SH-SEC-005 | Upstream error details are not reflected | Simulate arbitrary AgentCore runtime error text and assert generic HTTP response |
@@ -202,7 +202,7 @@ These source observations are positive design controls, not proof that the deplo
 |---|---|
 | Static source inspection of API/auth/policy/gateway/approval/data paths | Performed; findings above |
 | Targeted default-branch credential-marker search | Performed; no concrete credential value surfaced; not a history scan |
-| Unit / integration / adversarial tests | Follow-up: 23 focused gateway/API/MCP tests passed; 159 tests passed when excluding the Lambda-entrypoint test blocked by missing optional mangum. Full suite: 159 passed, 1 environment failure. |
+| Unit / integration / adversarial tests | Follow-ups: SH-SEC-001 focused gateway/API/MCP tests 23 passed; SH-SEC-002 approval/DynamoDB/gateway tests 22 passed; broader suite 163 passed with the Lambda-entrypoint test excluded because optional mangum is absent. |
 | Browser / header / clickjacking checks | Not run |
 | Dependency / SAST / DAST scan | Not run |
 | SAM CLI validation / cfn-lint / package build | Not run |
@@ -212,7 +212,7 @@ These source observations are positive design controls, not proof that the deplo
 ## Prioritized remediation sequence
 
 1. Close SH-SEC-007 by proving customer clients cannot write trusted tenant/customer attributes; complete the real Cognito configuration.
-2. Decide and enforce maker-checker separation (SH-SEC-002).
+2. **SH-SEC-002 remediated locally:** verify the same-subject denial and conditional transition against the deployed DynamoDB store in staging.
 3. **SH-SEC-001 remediated locally:** repeat the response-equivalence check against the deployed API/MCP service during staging verification.
 4. Design an audited, safe approval-token recovery flow (SH-SEC-003).
 5. Add operator response headers and sanitize AgentCore error responses (SH-SEC-004/005).

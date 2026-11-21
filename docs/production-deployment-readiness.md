@@ -38,9 +38,10 @@ The earlier source-review cycle did not run tests, SAST/DAST, browser checks, SA
    app clients must not be able to write custom:tenant_id or
    custom:customer_id. Enforce controlled administrative provisioning and
    demonstrate issued token claims in staging.
-2. **Maker-checker decision (Medium):** decide whether the request's
-   originating principal may approve its own request. If not, enforce the
-   separation in both SQLite and DynamoDB persistence transitions.
+2. **Maker-checker separation (Medium):** locally remediated in SQLite and
+   DynamoDB source and covered by same-subject denial, independent-operator
+   approval, and legacy self-approved execution regression tests. Repeat the
+   conditional transition check against live DynamoDB in staging.
 3. **Order identifier disclosure (Medium):** remediated locally in the
    authenticated HTTP and MCP response paths and covered by regression tests.
    Repeat the response-equivalence check against deployed services in staging
@@ -244,24 +245,27 @@ Subsequent non-deploying infrastructure validation and local regression evidence
 ## Current local release-candidate status
 
 - Production-infrastructure review baseline: 6b26b6aaea1308706abb1ba3eac375251bd45d25.
-- SH-SEC-001 remediation baseline: `main` at 18ab9165a3440205d5fdd2f4024a77ca6b66beb9.
+- SH-SEC-001 remediation commit: `main` at `dbb36bf210105a842e2b8796db4762d77659d809`.
+- SH-SEC-002 remediation baseline: `main` after SH-SEC-001 at `dbb36bf`; this remediation is local and has not been deployed.
 - Architecture document: [architecture.md](architecture.md).
 - Security findings and release-test matrix: [security-review-2026-11-21.md](security-review-2026-11-21.md).
 - Initial security-review record: [2026-11-20-local-release-candidate-security-review.md](cycles/2026-11-20-local-release-candidate-security-review.md).
 - SH-SEC-001 remediation record: [2026-11-20-security-remediation-sh-sec-001.md](cycles/2026-11-20-security-remediation-sh-sec-001.md).
+- SH-SEC-002 remediation record: [2026-11-20-security-remediation-sh-sec-002.md](cycles/2026-11-20-security-remediation-sh-sec-002.md).
 - Selected Region: ap-southeast-2 (Sydney).
-- SH-SEC-001 follow-up: 23 focused gateway/API/MCP tests passed; the broader suite passed 159 tests when the Lambda-entrypoint test was excluded because optional `mangum` is not installed. The unfiltered suite reported 159 passed and one environment failure.
-- Compilation, repository metadata validation, focused Ruff checks, and `git diff --check`: passed for the SH-SEC-001 working tree.
+- SH-SEC-001 follow-up: 23 focused gateway/API/MCP tests passed.
+- SH-SEC-002 follow-up: 22 focused approval/DynamoDB/gateway tests passed; the broader suite passed 163 tests with the Lambda-entrypoint test excluded because optional `mangum` is not installed.
+- Compilation and repository metadata validation passed. Ruff F/I checks and E/F/I checks excluding existing E501 line-length diagnostics passed; broader full-file Ruff checks still report pre-existing style findings. `git diff --check` passed.
 - Browser/header checks, SAST/DAST, dependency scans, and deployed-service verification: not run.
 - Four production templates passed standalone CloudFormation lint and SAM build/package; three passed `sam validate --lint`, and the new identity stack passed SAM basic validation (see offline implementation evidence below).
 - Cognito/DynamoDB/S3/Lambda/API Gateway/AgentCore resources: not deployed or inspected.
 - Deployment decision: **NO-GO**.
 
-The next engineering slice is SH-SEC-002 (maker-checker separation of duties). Local verification authorization does not authorize AWS access or resource creation. Creating billable resources remains a separate approval gate.
+SH-SEC-001 and SH-SEC-002 are remediated in local source. The next security slice remains SH-SEC-007, the conditional High Cognito trusted-attribute deployment gate. Local verification does not authorize AWS access or resource creation; billable resources remain a separate approval gate.
 
 ## Production-only offline implementation update - 2026-11-20
 
-The owner selected a production-only implementation and explicitly excluded AWS account access and cloud deployment. The following local work is complete; it does not change the overall release verdict above. SH-SEC-001 has since been remediated locally with HTTP/MCP regression coverage; six findings remain open, and no live AWS behavior is claimed.
+The owner selected a production-only implementation and explicitly excluded AWS account access and cloud deployment. The following local work is complete; it does not change the overall release verdict above. SH-SEC-001 and SH-SEC-002 have since been remediated locally with HTTP/MCP and approval regression coverage; five findings remain open, and no live AWS behavior is claimed.
 
 - All four templates are production-only. The new infra/cognito/identity-stack.yaml defines the User Pool, V3 trigger, separate customer/operator/M2M clients, scopes, operator group, and hosted domain. The customer app client cannot write tenant/customer attributes; the schema attributes are immutable and intended for trusted administrative provisioning.
 - infra/cognito/pre-token-generation.yaml remains an add-on for an existing production User Pool.

@@ -51,7 +51,7 @@ Even an ALLOW refund request remains pending operator approval before execution.
 2. Compute an action digest covering the authenticated principal, tenant, customer, agent, tool name, order, and canonical arguments.
 3. Create the refund request under a tenant-scoped idempotency key.
 4. Create one approval row bound to the request ID, principal ID, tenant, action digest, policy ID/version, and expiry.
-5. An authenticated operator approves or rejects the pending request.
+5. An authenticated operator distinct from the stored requesting principal approves or rejects the pending request. Self-approval is denied in both persistence adapters and recorded as an audit event.
 6. Approval creates a cryptographically random token. Store only its hash; deliver the raw token once.
 7. On execution, the service verifies token hash, approved status, expiry, exact stored digest/version, current policy ID/version, order ownership, eligibility, currency, and remaining balance.
 8. A single SQLite transaction debits the demo refundable balance, marks the request executed, consumes the token, and appends the execution audit event.
@@ -253,11 +253,15 @@ authenticated HTTP and MCP response paths: resource-denial reason codes are
 normalized for callers while precise policy reasons remain in restricted audit
 events and internal evaluation results. Local regression tests cover missing,
 cross-tenant, and cross-customer order identifiers; deployed staging verification
-remains pending. Remaining source-level blockers include no enforced
-maker-checker invariant, an approval-token recovery gap after page refresh,
-missing operator-console framing protections, upstream AgentCore error
-reflection, and no per-operator hosted-inference budget. The Cognito
-trusted-attribute write boundary remains a conditional High deployment blocker.
+remains pending. SH-SEC-002 (maker-checker separation) is now enforced in
+local SQLite and DynamoDB source: the requester cannot approve their own
+refund, denial is audited, and execution revalidates the stored requester and
+approver. Local regression tests pass; live DynamoDB staging verification
+remains pending. Remaining source-level blockers include an approval-token
+recovery gap after page refresh, missing operator-console framing protections,
+upstream AgentCore error reflection, and no per-operator hosted-inference
+budget. The Cognito trusted-attribute write boundary remains a conditional
+High deployment blocker.
 Findings and required evidence are tracked in
 [the 2026-11-20 security review](security-review-2026-11-21.md).
 
@@ -267,10 +271,13 @@ Findings and required evidence are tracked in
   gateway, parameter-bound approval flow, SQLite and DynamoDB adapters,
   operator API, MCP adapter, hosted Red/Blue evaluator, and audit archive
   components.
-- Current local verification for SH-SEC-001: focused HTTP/MCP/gateway tests
-  passed; the Python suite passed with the Lambda-entrypoint test excluded
-  because the optional `mangum` dependency is absent; compilation, repository
-  metadata validation, focused Ruff checks, and diff validation passed.
+- Current local verification: SH-SEC-001 HTTP/MCP/gateway regressions passed;
+  SH-SEC-002 approval/DynamoDB/gateway regressions passed; the Python suite
+  passed with the Lambda-entrypoint test excluded because optional `mangum`
+  is absent; compilation, repository metadata validation, and diff validation
+  passed. Ruff F/I checks and E/F/I checks excluding existing E501
+  line-length diagnostics passed. Full-file Ruff still reports pre-existing
+  style diagnostics in touched modules; no unrelated lint cleanup was included.
 - Not verified in this cycle: SAST/DAST, dependency scans, browser behavior,
   SAM transform validation, package build, AWS IAM/user-pool configuration,
   deployed storage, AgentCore OBO exchange, and end-to-end audit archive

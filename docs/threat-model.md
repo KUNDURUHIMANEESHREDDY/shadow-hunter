@@ -41,6 +41,7 @@
 - Tool gateway with a single allowlisted route to business tools.
 - Strict request schemas, canonical serialization, bounded numeric/currency fields.
 - Approval tokens bound to exact action, arguments, principal, resource, policy version, expiry, and nonce.
+- Maker-checker separation: the authenticated requester subject cannot approve its own refund; enforce the requester/approver inequality in both persistence approval and execution transitions.
 - Atomic idempotency and execution-state transitions.
 - Policy re-evaluation immediately before the side effect.
 - Separate least-privilege roles for the agent, gateway, approval service, and business tools.

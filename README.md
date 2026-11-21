@@ -185,7 +185,7 @@ ChatGPT task automations currently support daily, weekly, and monthly recurring 
 | GitHub Actions workflow | REMOVED | No unattended runner workflow remains in the repository |
 | Self-hosted runner | REMOVED FROM DESIGN | No runner is used for assistant-led interactive coding |
 | Assistant-led coding | INTERACTIVE ONLY | Work is performed in the active ChatGPT session; no reusable ChatGPT session endpoint or background execution is available |
-| Security review | OVERALL VERDICT PARTIAL; SH-SEC-001 REMEDIATED LOCALLY | HTTP and MCP responses now normalize resource-denial reasons; 23 focused gateway/API/MCP tests pass. Six findings remain open, including one conditional High deployment blocker; staging, DAST, browser, dependency and live AWS verification remain outstanding. See security review. |
+| Security review | OVERALL VERDICT PARTIAL; SH-SEC-001/002 REMEDIATED LOCALLY | HTTP/MCP resource denials are normalized; SQLite/DynamoDB approval transitions enforce maker-checker separation. 23 SH-SEC-001 tests, 22 SH-SEC-002 tests, and 163 broader tests (excluding optional mangum Lambda entrypoint) pass. Five findings remain open, including one conditional High deployment blocker; live DynamoDB staging, DAST, browser, dependency and AWS verification remain outstanding. See security review. |
 | Production deployment | NO-GO - SECURITY + LIVE SERVICE VERIFICATION PENDING | Production-only infrastructure is implemented locally. No AWS account or cloud resources were used. Close the security-review findings and obtain separate approval before any deployment. |
 
 Only move a row to COMPLETE after adding a commit, test result, deployed resource identifier, or other inspectable evidence. Update this table after every engineering cycle.
