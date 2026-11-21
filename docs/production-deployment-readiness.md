@@ -1,27 +1,22 @@
 # Production deployment readiness
 
 - Review date: 2026-11-20
-- Repository head reviewed: `6b26b6aaea1308706abb1ba3eac375251bd45d25` (`main`)
+- Original source-review baseline: `6b26b6aaea1308706abb1ba3eac375251bd45d25`
+- Merged remediation baseline: `b8968a8befe6cd031852ab43944a38544c5d5dc0` (`main` before final remediation commit)
 - Selected deployment Region: `ap-southeast-2` (Asia Pacific — Sydney)
-- Status: **NO-GO — SOURCE REVIEW UPDATED; FORMAL VALIDATION AND AWS DEPLOYMENT NOT COMPLETE**
+- Status: **NO-GO — LOCAL REGRESSION AND TEMPLATE VALIDATION PASS; LIVE IDENTITY / STAGING PROOF OPEN**
 - Scope: current SAM/CloudFormation templates, stack dependencies, source-level API/auth/data security review, and staged deployment preparation.
 - AWS resources created or changed: **none**.
 
 ## Go / no-go
 
-**NO-GO for production deployment at this point.** All four current templates pass standalone CloudFormation lint and SAM packaging; three pass SAM lint validation and the new identity stack passes SAM basic validation. The security-review findings and live Cognito/AgentCore/data-plane verification remain release gates.
+**NO-GO for production deployment at this point.** The merged source passes 177 Python tests; cfn-lint passes all four production templates; sam validate --lint passes the existing-pool Cognito trigger, data and API templates; the new Cognito identity stack passes SAM basic validation. Prior WSL2 evidence records SAM build success for all four templates. No SAM package upload, AWS deployment, deployed Cognito pool, live JWT claims, API Gateway edge behavior, DynamoDB staging behavior, or S3 audit proof was performed in this cycle.
 
-The user-approved boundary for this cycle is template review and preparation only. Do not create stacks, user pools, app clients, buckets, tables, queues, Lambda functions, API Gateway APIs, AgentCore Harnesses, Gateways, credential providers, model invocations, or paid resources until the owner gives explicit AWS deployment approval.
+The owner authorized local application remediation and non-deploying verification for this cycle. That authorization does not include AWS account/API access, credential access, stack creation, user pools, app clients, buckets, tables, queues, Lambda functions, API Gateway APIs, AgentCore Harnesses, Gateways, credential providers, model invocations, artifact uploads, or paid resources. Those actions remain blocked pending separate explicit AWS deployment approval.
 
 ## Current baseline update — 2026-11-20
 
-The prior infrastructure review referenced an older commit. This document now
-uses the current reviewed main baseline. The source-level security review is
-recorded in [security-review-2026-11-21.md](security-review-2026-11-21.md).
-Its overall verdict is **PARTIAL**, and it identifies one conditional High
-Cognito trust-boundary blocker plus six application/operability findings.
-The detailed evidence, confidence, remediation direction, and required
-regression tests are in that report.
+The initial source review was performed at the historical baseline shown above. Subsequent commits added the Cognito identity stack and completed maker-checker / response-boundary fixes; this cycle reconciles the remaining application changes on top of merged main. The source/security review is recorded in [security-review-2026-11-21.md](security-review-2026-11-21.md). Its overall verdict is **PARTIAL**: five application findings are remediated locally, hosted-inference budgeting is partially mitigated, and the Cognito identity-as-code controls require live staging proof. The detailed evidence, confidence, remediation direction, and regression matrix are in that report.
 
 The selected target remains ap-southeast-2 (Sydney). AWS's current
 [AgentCore supported-Regions matrix](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agentcore-regions.html)
@@ -30,30 +25,17 @@ used by this architecture. Regional availability does not establish account
 entitlement, service quotas, model availability, Cognito token-exchange
 configuration, or pricing; those remain Stage 0 checks.
 
-The earlier source-review cycle did not run tests, SAST/DAST, browser checks, SAM validation, cfn-lint, packaging, or AWS integration. The production-only offline implementation and its later verification are recorded below. Those checks do not close the security findings or prove live AWS behavior; the release gate remains **NO-GO**. No AWS resources or credentials were accessed.
+The initial source-review cycle did not run tests or dynamic checks. Subsequent owner-authorized local verification has now run the full Python suite, Edge browser framing/header checks, SAST/dependency checks, cfn-lint and SAM validation. These checks do not prove live AWS behavior or close the staging gates; production remains **NO-GO**. No AWS credentials or resources were accessed or changed.
 
 ## Security blockers to close before customer-facing deployment
 
-1. **Trusted Cognito attributes (High, deployment-dependent):** customer
-   app clients must not be able to write custom:tenant_id or
-   custom:customer_id. Enforce controlled administrative provisioning and
-   demonstrate issued token claims in staging.
-2. **Maker-checker separation (Medium):** locally remediated in SQLite and
-   DynamoDB source and covered by same-subject denial, independent-operator
-   approval, and legacy self-approved execution regression tests. Repeat the
-   conditional transition check against live DynamoDB in staging.
-3. **Order identifier disclosure (Medium):** remediated locally in the
-   authenticated HTTP and MCP response paths and covered by regression tests.
-   Repeat the response-equivalence check against deployed services in staging
-   before release; detailed audit reasons remain restricted to operators.
-4. **Approval token recovery (Medium):** add a secure, audited recovery or
-   rotation workflow for the in-memory-only one-time token.
-5. **Operator console hardening (Low):** add anti-framing and standard browser
-   security headers.
-6. **Upstream error boundary (Low):** return generic AgentCore failures to
-   customers and retain only redacted diagnostics internally.
-7. **Hosted inference budget (Medium):** introduce per-operator/global usage
-   budgets, alerts, and a kill switch for the NIM evaluation route.
+1. **Trusted Cognito attributes (High, deployment-dependent):** the new identity stack defines immutable tenant/customer attributes, restricted customer WriteAttributes, separate customer/operator/M2M clients, operator MFA/group, and V3_0 trigger association. Verify the deployed pool, provisioning process, app-client settings and issued claims in staging before customer traffic.
+2. **Maker-checker separation (Medium):** remediated in SQLite and DynamoDB source. Both approval and execution paths enforce requester/approver separation and record audit evidence. Re-run conditional transition checks against live DynamoDB in staging.
+3. **Order identifier disclosure (Medium):** remediated at authenticated HTTP and MCP response boundaries using the shared public_tool_result normalizer; detailed policy reasons remain in restricted audit evidence. Repeat response-equivalence checks against deployed services.
+4. **Approval token recovery (Medium):** operator-authenticated audited token rotation is implemented; old hashes are invalidated and previous-hash conditional updates prevent concurrent rotations. Browser reload/recovery/execution E2E remains pending.
+5. **Operator console hardening (Low):** CSP frame-ancestors, X-Frame-Options, nosniff, and Referrer-Policy are implemented and locally verified in Edge. Verify deployed API Gateway headers.
+6. **Upstream error boundary (Low):** customer chat returns a generic AgentCore 502 plus trace ID and does not reflect provider text; a regression test covers this.
+7. **Hosted inference budget (Medium):** per-operator daily quota/cooldown and kill switch are implemented in SQLite/DynamoDB. A global aggregate provider budget, spend cap and alerting remain outstanding.
 
 Do not waive the conditional High item based solely on source comments. Verify
 the actual Cognito user-pool and app-client configuration.
@@ -244,28 +226,25 @@ Subsequent non-deploying infrastructure validation and local regression evidence
 
 ## Current local release-candidate status
 
-- Production-infrastructure review baseline: 6b26b6aaea1308706abb1ba3eac375251bd45d25.
-- SH-SEC-001 remediation commit: `main` at `dbb36bf210105a842e2b8796db4762d77659d809`.
-- SH-SEC-002 remediation baseline: `main` after SH-SEC-001 at `dbb36bf`; this remediation is local and has not been deployed.
+- Original production-infrastructure review baseline: 6b26b6aaea1308706abb1ba3eac375251bd45d25.
+- Merged remediation baseline: b8968a8befe6cd031852ab43944a38544c5d5dc0; this cycle preserves the Cognito identity and SH-SEC-001/002 work already on main.
 - Architecture document: [architecture.md](architecture.md).
 - Security findings and release-test matrix: [security-review-2026-11-21.md](security-review-2026-11-21.md).
-- Initial security-review record: [2026-11-20-local-release-candidate-security-review.md](cycles/2026-11-20-local-release-candidate-security-review.md).
-- SH-SEC-001 remediation record: [2026-11-20-security-remediation-sh-sec-001.md](cycles/2026-11-20-security-remediation-sh-sec-001.md).
-- SH-SEC-002 remediation record: [2026-11-20-security-remediation-sh-sec-002.md](cycles/2026-11-20-security-remediation-sh-sec-002.md).
+- Original source-review cycle: [2026-11-20-local-release-candidate-security-review.md](cycles/2026-11-20-local-release-candidate-security-review.md).
+- Remediation cycle: [2026-11-20-release-candidate-remediation.md](cycles/2026-11-20-release-candidate-remediation.md).
 - Selected Region: ap-southeast-2 (Sydney).
-- SH-SEC-001 follow-up: 23 focused gateway/API/MCP tests passed.
-- SH-SEC-002 follow-up: 22 focused approval/DynamoDB/gateway tests passed; the broader suite passed 163 tests with the Lambda-entrypoint test excluded because optional `mangum` is not installed.
-- Compilation and repository metadata validation passed. Ruff F/I checks and E/F/I checks excluding existing E501 line-length diagnostics passed; broader full-file Ruff checks still report pre-existing style findings. `git diff --check` passed.
-- Browser/header checks, SAST/DAST, dependency scans, and deployed-service verification: not run.
-- Four production templates passed standalone CloudFormation lint and SAM build/package; three passed `sam validate --lint`, and the new identity stack passed SAM basic validation (see offline implementation evidence below).
+- Merged-main Python suite: **177 passed**; focused approval/API/DynamoDB/gateway group: **37 passed**.
+- Browser: Edge headless response-header and iframe-blocking check passed; complete reload/recovery/execution UI E2E remains pending.
+- Infrastructure: cfn-lint passed all four templates; sam validate --lint passed existing-pool Cognito trigger, data and API; basic SAM validation passed the new identity stack. The prior WSL2 cycle record reports sam build --no-use-container passed all four templates.
+- Semgrep/pip-audit/Bandit evidence is described in the security report with its snapshot scope; no DAST or penetration test was performed.
 - Cognito/DynamoDB/S3/Lambda/API Gateway/AgentCore resources: not deployed or inspected.
 - Deployment decision: **NO-GO**.
 
-SH-SEC-001 and SH-SEC-002 are remediated in local source. The next security slice remains SH-SEC-007, the conditional High Cognito trusted-attribute deployment gate. Local verification does not authorize AWS access or resource creation; billable resources remain a separate approval gate.
+SH-SEC-001–005 are remediated in source, SH-SEC-006 is partially mitigated with per-operator bounds, and SH-SEC-007 has an identity-as-code control but requires actual pool/client/token proof in staging. Local verification does not authorize AWS access or resource creation; billable resources remain a separate approval gate.
 
 ## Production-only offline implementation update - 2026-11-20
 
-The owner selected a production-only implementation and explicitly excluded AWS account access and cloud deployment. The following local work is complete; it does not change the overall release verdict above. SH-SEC-001 and SH-SEC-002 have since been remediated locally with HTTP/MCP and approval regression coverage; five findings remain open, and no live AWS behavior is claimed.
+The owner selected a production-only implementation and explicitly excluded AWS account access and cloud deployment. The following local work is complete; it does not change the overall release verdict above. SH-SEC-001 through SH-SEC-005 are remediated in source, SH-SEC-006 is partially mitigated with per-operator bounds, and SH-SEC-007 has an identity-as-code control but still requires live deployment evidence. No live AWS behavior is claimed.
 
 - All four templates are production-only. The new infra/cognito/identity-stack.yaml defines the User Pool, V3 trigger, separate customer/operator/M2M clients, scopes, operator group, and hosted domain. The customer app client cannot write tenant/customer attributes; the schema attributes are immutable and intended for trusted administrative provisioning.
 - infra/cognito/pre-token-generation.yaml remains an add-on for an existing production User Pool.
@@ -288,4 +267,4 @@ Environment: Windows working tree with WSL2 Ubuntu; Python 3.12.16; SAM CLI 1.17
 - Repository validator, Python compilation, app dependency check, JSON parsing and git diff --check: passed.
 - No AWS CLI/API calls, account lookup, credentials, live service tests, deployments, change sets, or billable resources were used.
 
-The Cognito trusted-attribute write boundary still requires live account configuration evidence. Maker-checker, order-existence disclosure, approval-token recovery, anti-framing, upstream error reflection, and hosted-inference usage-budget findings also remain unresolved or require explicit risk acceptance. The release decision therefore remains NO-GO.
+The identity stack's trusted-attribute controls, maker-checker logic, order-response normalization, approval-token recovery, anti-framing headers and upstream error sanitization are implemented in source. The Cognito write boundary still requires live account configuration evidence; operator UI recovery E2E, deployed edge headers and global inference spend control remain open. The release decision therefore remains NO-GO.

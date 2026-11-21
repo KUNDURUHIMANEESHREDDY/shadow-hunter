@@ -136,6 +136,13 @@ class SQLiteStore:
                     consumed_at TEXT
                 );
 
+                CREATE TABLE IF NOT EXISTS operator_eval_usage (
+                    operator_key TEXT PRIMARY KEY,
+                    usage_date TEXT NOT NULL,
+                    run_count INTEGER NOT NULL,
+                    last_run_at TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS a2a_nonces (
                     nonce TEXT PRIMARY KEY,
                     agent_id TEXT NOT NULL,
@@ -428,6 +435,47 @@ class SQLiteStore:
             raise StoreError("Approval did not issue a capability token")
         return raw_token
 
+    def rotate_approval_token(self, approval_id: str, operator_id: str) -> str:
+        """Rotate an approved refund capability after a lost browser-held token."""
+        raw_token = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+        with self._transaction() as conn:
+            row = conn.execute(
+                "SELECT * FROM approvals WHERE approval_id = ?", (approval_id,)
+            ).fetchone()
+            if row is None:
+                raise StoreError("Approval not found")
+            if row["status"] != "APPROVED":
+                raise StoreError("Only an approved, unused capability can be recovered")
+            now = iso_now()
+            if row["expires_at"] <= now:
+                raise StoreError("Approval has expired")
+            updated = conn.execute(
+                """
+                UPDATE approvals
+                SET token_hash = ?
+                WHERE approval_id = ? AND status = 'APPROVED'
+                  AND expires_at > ? AND token_hash = ?
+                """,
+                (token_hash, approval_id, now, row["token_hash"]),
+            )
+            if updated.rowcount != 1:
+                raise StoreError("Approval is no longer recoverable")
+            self._insert_audit(
+                conn,
+                event_type="APPROVAL_TOKEN_ROTATED",
+                trace_id=row["trace_id"] or row["refund_request_id"],
+                request_id=row["request_id"] or row["refund_request_id"],
+                actor_id=operator_id,
+                tenant_id=row["tenant_id"],
+                resource_id=row["refund_request_id"],
+                action_digest=row["action_digest"],
+                policy_id=row["policy_id"],
+                policy_version=row["policy_version"],
+                details={"approval_id": approval_id, "token_rotated": True},
+            )
+        return raw_token
+
     def reject(self, approval_id: str, approver_id: str, reason: str) -> None:
         with self._transaction() as conn:
             row = conn.execute(
@@ -670,6 +718,69 @@ class SQLiteStore:
             except sqlite3.IntegrityError:
                 return False
         return True
+
+    def reserve_agent_evaluation(
+        self,
+        operator_id: str,
+        *,
+        daily_limit: int,
+        cooldown_seconds: int,
+    ) -> None:
+        """Atomically reserve one hosted evaluation against per-operator limits."""
+        if (
+            not isinstance(operator_id, str) or not operator_id
+            or operator_id.strip() != operator_id
+            or isinstance(daily_limit, bool) or not isinstance(daily_limit, int)
+            or daily_limit < 1
+            or isinstance(cooldown_seconds, bool)
+            or not isinstance(cooldown_seconds, int) or cooldown_seconds < 0
+        ):
+            raise StoreError("Invalid operator evaluation budget configuration")
+        now = utc_now()
+        now_text = now.isoformat(timespec="microseconds")
+        usage_date = now.date().isoformat()
+        cutoff = (now - timedelta(seconds=cooldown_seconds)).isoformat(
+            timespec="microseconds"
+        )
+        operator_key = hashlib.sha256(operator_id.encode("utf-8")).hexdigest()
+        trace_id = str(uuid.uuid4())
+        with self._transaction() as conn:
+            row = conn.execute(
+                "SELECT * FROM operator_eval_usage WHERE operator_key = ?",
+                (operator_key,),
+            ).fetchone()
+            run_count = 1
+            if row is not None and row["usage_date"] == usage_date:
+                if row["last_run_at"] > cutoff:
+                    raise StoreError("Operator evaluation cooldown is active")
+                if row["run_count"] >= daily_limit:
+                    raise StoreError("Operator daily evaluation budget is exhausted")
+                run_count = int(row["run_count"]) + 1
+            conn.execute(
+                """
+                INSERT INTO operator_eval_usage (
+                    operator_key, usage_date, run_count, last_run_at
+                ) VALUES (?, ?, ?, ?)
+                ON CONFLICT(operator_key) DO UPDATE SET
+                    usage_date = excluded.usage_date,
+                    run_count = excluded.run_count,
+                    last_run_at = excluded.last_run_at
+                """,
+                (operator_key, usage_date, run_count, now_text),
+            )
+            self._insert_audit(
+                conn,
+                event_type="AGENT_EVALUATION_BUDGET_RESERVED",
+                trace_id=trace_id,
+                request_id=trace_id,
+                actor_id=operator_id,
+                tenant_id="operator",
+                details={
+                    "daily_limit": daily_limit,
+                    "cooldown_seconds": cooldown_seconds,
+                    "run_count": run_count,
+                },
+            )
 
     def latest_agent_evaluation(self) -> dict[str, Any]:
         """Return the latest redacted aggregate and case outcomes, if present."""

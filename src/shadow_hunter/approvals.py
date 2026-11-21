@@ -32,6 +32,11 @@ class ApprovalService:
             raise StoreError("Authenticated approver identity is required")
         return self.store.approve(approval_id, approver_id)
 
+    def rotate_token(self, approval_id: str, operator_id: str) -> str:
+        if not operator_id or operator_id.strip() != operator_id:
+            raise StoreError("Authenticated operator identity is required")
+        return self.store.rotate_approval_token(approval_id, operator_id)
+
     def reject(self, approval_id: str, approver_id: str, reason: str) -> None:
         if not approver_id or approver_id.strip() != approver_id:
             raise StoreError("Authenticated approver identity is required")

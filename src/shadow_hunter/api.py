@@ -100,6 +100,18 @@ def create_app(
         description="Deterministic policy enforcement with an authenticated MCP tool server.",
         lifespan=lifespan,
     )
+    @app.middleware("http")
+    async def add_browser_security_headers(request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "frame-ancestors 'none'; object-src 'none'; base-uri 'none'",
+        )
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        return response
+
     app.state.store = store
     app.state.authenticator = authenticator
     app.state.approvals = approvals
@@ -312,8 +324,14 @@ def create_app(
                 trace_id=trace_id,
             )
             return result
-        except AgentCoreInvocationError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except AgentCoreInvocationError:
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "message": "AgentCore invocation failed",
+                    "trace_id": trace_id,
+                },
+            ) from None
 
     @app.post("/v1/agent/tools/{tool_name}")
     def agent_tool(
@@ -398,6 +416,23 @@ def create_app(
         except StoreError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+    @app.post("/v1/operator/approvals/{approval_id}/recover-token")
+    def recover_approval_token(
+        approval_id: str,
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, str]:
+        operator_id = operator(authorization)
+        try:
+            token = approvals.rotate_token(approval_id, operator_id)
+            return {
+                "approval_id": approval_id,
+                "status": "APPROVED",
+                "approval_token": token,
+                "token_delivery": "shown_once",
+            }
+        except StoreError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     @app.post("/v1/operator/approvals/{approval_id}/reject")
     def reject_request(
         approval_id: str,
@@ -462,6 +497,10 @@ def create_app(
         operator_id = operator(authorization)
         if set(body) - {"rounds"}:
             raise HTTPException(status_code=422, detail="Only rounds is accepted")
+        if os.environ.get("SHADOW_HUNTER_EVAL_ENABLED", "true").strip().lower() not in {
+            "1", "true", "yes", "on"
+        }:
+            raise HTTPException(status_code=503, detail="Hosted agent evaluations are disabled")
         # The Lambda has a 28-second timeout. Reserve four seconds for local
         # sandbox, policy, and audit work; divide the remaining 24-second NIM
         # budget across the two sequential hosted-model calls in each round.
@@ -483,6 +522,20 @@ def create_app(
             red_strategy_planner = NIMRedStrategyPlanner.from_environment(nim_client)
         except (A2AConfigurationError, NIMConfigurationError) as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+        try:
+            daily_limit = int(os.environ.get("SHADOW_HUNTER_EVAL_RUNS_PER_OPERATOR_DAILY", "5"))
+            cooldown_seconds = int(os.environ.get("SHADOW_HUNTER_EVAL_COOLDOWN_SECONDS", "60"))
+            store.reserve_agent_evaluation(
+                operator_id,
+                daily_limit=daily_limit,
+                cooldown_seconds=cooldown_seconds,
+            )
+        except (ValueError, StoreError):
+            raise HTTPException(
+                status_code=429,
+                detail="Operator evaluation cooldown or daily budget is exhausted",
+            ) from None
 
         run_id = str(uuid4())
         try:

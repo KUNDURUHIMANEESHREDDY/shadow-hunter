@@ -182,6 +182,9 @@ Resources:
           SHADOW_HUNTER_NIM_TIMEOUT_SECONDS: '8'
           SHADOW_HUNTER_NIM_MAX_TOKENS: '512'
           SHADOW_HUNTER_DEMO_MODE: 'false'
+          SHADOW_HUNTER_EVAL_ENABLED: 'true'
+          SHADOW_HUNTER_EVAL_RUNS_PER_OPERATOR_DAILY: '5'
+          SHADOW_HUNTER_EVAL_COOLDOWN_SECONDS: '60'
       Policies:
         - AWSLambdaBasicExecutionRole
         - Version: '2012-10-17'

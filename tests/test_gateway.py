@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from shadow_hunter.approvals import ApprovalService
-from shadow_hunter.gateway import ToolGateway
+from shadow_hunter.gateway import ToolGateway, public_tool_result
 from shadow_hunter.policy import PolicyConfig, PolicyEngine, Principal
 from shadow_hunter.store import SQLiteStore
 
@@ -206,3 +206,41 @@ def test_approval_audit_events_keep_original_request_and_trace_ids(system):
     assert events
     assert {event["request_id"] for event in events} == {"request-correlated-1"}
     assert "REFUND_EXECUTED" in {event["event_type"] for event in events}
+
+
+def test_missing_and_foreign_orders_share_non_enumerating_caller_response(system):
+    store, _, gateway, customer = system
+    store.add_order(
+        order_id="foreign-order",
+        tenant_id="tenant-1",
+        customer_id="another-customer",
+        currency="USD",
+        refundable_minor=12_000,
+    )
+
+    missing = gateway.invoke(
+        principal=customer,
+        tool_name="get_order",
+        arguments={"order_id": "does-not-exist"},
+        request_id="request-missing",
+        trace_id="trace-missing",
+    )
+    foreign = gateway.invoke(
+        principal=customer,
+        tool_name="get_order",
+        arguments={"order_id": "foreign-order"},
+        request_id="request-foreign",
+        trace_id="trace-foreign",
+    )
+    public_missing = public_tool_result(missing)
+    public_foreign = public_tool_result(foreign)
+
+    assert missing["reason_code"] == "ORDER_CONTEXT_MISSING"
+    assert foreign["reason_code"] == "RESOURCE_OWNER_MISMATCH"
+    assert public_missing["decision"] == public_foreign["decision"] == "DENY"
+    assert public_missing["reason_code"] == public_foreign["reason_code"] == "RESOURCE_NOT_AVAILABLE"
+    assert set(public_missing) == set(public_foreign)
+    audit = store.list_audit(limit=20)
+    reasons = {row.get("reason_code") for row in audit if row.get("event_type") == "POLICY_DECISION"}
+    assert "ORDER_CONTEXT_MISSING" in reasons
+    assert "RESOURCE_OWNER_MISMATCH" in reasons

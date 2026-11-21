@@ -186,7 +186,7 @@
       let action = '<span class="muted">No action</span>';
       if (row.status === "PENDING") action = '<button data-approve="' + id + '">Approve</button><button class="secondary" data-reject="' + id + '">Reject</button>';
       if (row.status === "APPROVED" && tokenAvailable) action = '<button data-execute="' + escapeHtml(row.refund_request_id) + '">Execute refund</button>';
-      if (row.status === "APPROVED" && !tokenAvailable) action = '<span class="muted">One-time token unavailable after refresh</span>';
+      if (row.status === "APPROVED" && !tokenAvailable) action = '<button class="secondary" data-recover="' + id + '">Recover capability</button>';
       return '<tr><td>' + id.slice(0,12) + '…</td><td>' + escapeHtml(row.order_id) + '</td><td>' + escapeHtml(row.amount_minor + " minor units " + row.currency) + '</td><td>' + escapeHtml(row.policy_decision + " · " + row.policy_reason_code) + '</td><td><span class="pill ' + escapeHtml(row.status) + '">' + escapeHtml(row.status) + '</span></td><td><div class="actions">' + action + '</div></td></tr>';
     }).join("") || '<tr><td colspan="6" class="muted">No approvals yet.</td></tr>';
   }
@@ -380,12 +380,21 @@
     const approveId = event.target.getAttribute("data-approve");
     const rejectId = event.target.getAttribute("data-reject");
     const executeId = event.target.getAttribute("data-execute");
+    const recoverId = event.target.getAttribute("data-recover");
     try {
       if (approveId) {
         const result = await api("/v1/operator/approvals/" + encodeURIComponent(approveId) + "/approve", {method:"POST", body:"{}"});
         const current = (await api("/v1/operator/approvals")).find(item => item.approval_id === approveId);
         if (current) approvalTokens.set(current.refund_request_id, result.approval_token);
         setMessage("Approval granted. One-time capability is available only in this tab until execution.");
+      } else if (recoverId) {
+        const result = await api(
+          "/v1/operator/approvals/" + encodeURIComponent(recoverId) + "/recover-token",
+          {method:"POST", body:"{}"}
+        );
+        const current = (await api("/v1/operator/approvals")).find(item => item.approval_id === recoverId);
+        if (current) approvalTokens.set(current.refund_request_id, result.approval_token);
+        setMessage("A replacement one-time capability was issued. The previous token is invalidated.");
       } else if (rejectId) {
         await api("/v1/operator/approvals/" + encodeURIComponent(rejectId) + "/reject", {method:"POST", body:JSON.stringify({reason:"Rejected in operator console"})});
         setMessage("Approval rejected.");

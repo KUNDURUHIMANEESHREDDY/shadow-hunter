@@ -2,17 +2,18 @@
 
 - Review date: 2026-11-20
 - Repository: [KUNDURUHIMANEESHREDDY/shadow-hunter](https://github.com/KUNDURUHIMANEESHREDDY/shadow-hunter)
-- Reviewed baseline: main at 6b26b6aaea1308706abb1ba3eac375251bd45d25
-- Assessment: **PARTIAL — broad static source review; not a penetration test, certification, or release approval**
+- Original source-review baseline: main at 6b26b6aaea1308706abb1ba3eac375251bd45d25
+- Merged remediation baseline: main at b8968a8befe6cd031852ab43944a38544c5d5dc0, before this cycle's final commit
+- Assessment: **PARTIAL — source review plus local regression/browser/SAST/dependency/SAM validation; not a penetration test, certification, or release approval**
 - Deployment status: **NOT DEPLOYED**; no AWS account resources or live credentials were accessed or changed.
 
 ## Executive summary
 
 The current implementation has several sound control boundaries: customer and delegated-agent JWT profiles are distinct in Cognito mode; tool calls pass through a fixed allowlist and deterministic policy engine; the model cannot execute refunds; approval capabilities are hashed at rest; SQLite and DynamoDB execution paths re-check stored approval state and order balance; and AWS roles are separated for application data access, audit export, and read-only audit verification.
 
-The source review also found release-relevant gaps. The most important deployment-dependent risk is that the pre-token trigger trusts Cognito tenant/customer attributes while the repository does not provision the user pool or constrain which app clients can write those attributes. A follow-up remediation has since closed the order-lookup disclosure in the authenticated HTTP and MCP response paths. The remaining application-level gaps are no enforced maker-checker rule, an unrecoverable one-time approval token after a page refresh, missing operator-console framing protections, upstream AgentCore error reflection, and unbounded per-operator hosted-model evaluation usage.
+The original source review identified seven findings. Subsequent main-branch work now implements maker-checker approval/execution checks and a Cognito identity stack with immutable tenant/customer attributes, restricted customer-client WriteAttributes, separate customer/operator/M2M clients, MFA/group controls, and a V3_0 pre-token trigger. This remediation cycle additionally implements audited approval-token rotation, API anti-framing headers, generic customer-facing AgentCore errors, and durable per-operator evaluation quotas/cooldowns with a kill switch. Order-existence response normalization is applied at the authenticated HTTP and MCP boundaries while detailed policy reasons remain in restricted audit evidence.
 
-**Do not deploy the customer or operator API to production until the High finding is closed and the Medium findings are fixed or formally accepted with compensating controls.** The AWS deployment gate also remains closed pending formal SAM validation, identity configuration, account/Region confirmation, cost approval, and staging evidence.
+Five application findings are remediated in local source, the inference-budget finding is partially mitigated, and the Cognito identity-as-code finding has a source-level control. **Production remains NO-GO** until the real Cognito pool/client configuration and issued tokens are verified in staging, deployed API Gateway headers and the browser recovery path are tested end to end, and global provider spend controls are completed or formally accepted. This report is not a penetration test, certification, or release approval.
 
 ## Scope and method
 
@@ -31,7 +32,7 @@ Reviewed the current default-branch source and infrastructure relevant to:
 
 The review was read-only. It used source inspection and targeted GitHub default-branch searches for common credential markers. No concrete credential value was surfaced by those searches; generic matches were in scanner rules, documentation, tests, or environment-variable references. This was **not** a full Git-history secret scan, dependency vulnerability scan, static-analysis run, or credential-validity check.
 
-No tests, builds, linters, SAM validators, browser checks, fuzzing, live endpoint calls, AWS API calls, or penetration tests were run in the original source-review cycle. The owner later authorized the prioritized remediation work and regression testing; follow-up evidence for SH-SEC-001 is recorded below.
+The original source-review cycle was read-only and did not run executable checks. The owner later authorized one remediation/verification cycle. Follow-up source changes and current merged-branch verification evidence are recorded below. No live AWS inspection, DAST, fuzzing, hosted model call, deployment, or penetration test was performed.
 
 ## Findings
 
@@ -79,31 +80,31 @@ Regression tests prove same-subject denial, pending-state preservation, denial a
 
 - **Severity:** MEDIUM — workflow availability / recoverability
 - **Confidence:** HIGH
-- **Status:** Open
-- **Affected paths:** [operator.html](../src/shadow_hunter/web/operator.html#L121), [operator.html](../src/shadow_hunter/web/operator.html#L189), [operator.html](../src/shadow_hunter/web/operator.html#L387), [api.py](../src/shadow_hunter/api.py#L384), [store.py](../src/shadow_hunter/store.py#L354)
+- **Status:** **Remediated locally** — audited operator-authenticated token rotation invalidates the previous hash and returns a replacement only once. SQLite and DynamoDB include an atomic previous-token-hash condition to prevent concurrent rotations from both succeeding. Operator UI recovery is implemented; full reload/lost-response browser E2E remains pending.
+- **Affected paths:** [operator.html](../src/shadow_hunter/web/operator.html), [api.py](../src/shadow_hunter/api.py), [approvals.py](../src/shadow_hunter/approvals.py), [store.py](../src/shadow_hunter/store.py), [dynamodb_store.py](../src/shadow_hunter/dynamodb_store.py)
 
 **Evidence**
 
-The raw approval token is returned once by the approve endpoint, retained in the browser's in-memory approvalTokens map, and never persisted by the UI. The database stores only the token hash. After a refresh, the UI explicitly reports that the one-time token is unavailable; the persisted approval is already APPROVED, and the existing approve endpoint will not issue another token for that state. No recovery or token-rotation operation exists.
+The raw approval token is returned once by the approve endpoint and retained only in the browser's in-memory approvalTokens map. The database stores only its hash. The remediation adds an operator-authenticated recover-token endpoint that rotates the stored hash, invalidating the previous capability and issuing the replacement once. SQLite and DynamoDB compare the previously read token hash in the atomic update, preventing concurrent recovery requests from both succeeding. The operator UI offers recovery after refresh.
 
 **Impact**
 
-A refresh, tab close, browser crash, or lost response after approval can leave an approved refund that cannot be executed through the supported UI. Operators may require manual database intervention, which is not an acceptable operational recovery path.
+A refresh or lost response no longer permanently strands an approved request: an authenticated operator can request an audited replacement capability. The new UI recovery path has API/service regression coverage; a full browser E2E through reload, recovery and execution remains to be run.
 
 **Recommended remediation**
 
-Preserve the one-time-token security property while adding an audited recovery protocol. Options include an explicit operator-authenticated capability rotation that invalidates the previous hash and issues a replacement once, or a server-side execution challenge bound to the approved action and operator identity. Do not store raw approval tokens in localStorage or the audit log. Add browser reload, lost-response, token-rotation, and replay tests.
+Verify the operator UI recovery flow end to end in a browser, including refresh, concurrent recovery attempts, replacement-token execution, and replay rejection. Keep raw approval tokens out of persistent browser storage and audit records.
 
 ### SH-SEC-004 — Operator console has no explicit anti-framing response policy
 
 - **Severity:** LOW
 - **Confidence:** HIGH for missing headers; exploitation depends on a valid authenticated operator session in the framed page
-- **Status:** Open
-- **Affected paths:** [api.py](../src/shadow_hunter/api.py#L98), [operator.html](../src/shadow_hunter/web/operator.html)
+- **Status:** **Remediated locally** — all API responses now include CSP frame-ancestors 'none', X-Frame-Options DENY, nosniff, and Referrer-Policy no-referrer. HTTP tests and a real Edge iframe attempt pass; deployed API Gateway headers remain unverified.
+- **Affected paths:** [api.py](../src/shadow_hunter/api.py), [operator.html](../src/shadow_hunter/web/operator.html)
 
 **Evidence**
 
-The FastAPI application and SAM API template do not set Content-Security-Policy frame-ancestors or X-Frame-Options for the operator page. The console contains approval and refund-execution controls.
+FastAPI now applies Content-Security-Policy frame-ancestors 'none', X-Frame-Options DENY, X-Content-Type-Options nosniff, and Referrer-Policy no-referrer to its responses. HTTP tests assert these headers, and Microsoft Edge headless confirms a same-origin iframe attempt is blocked. Deployed API Gateway/edge behavior has not been checked.
 
 **Impact and precondition**
 
@@ -111,18 +112,18 @@ A malicious site may attempt to frame the operator interface and trick an alread
 
 **Recommended remediation**
 
-Send Content-Security-Policy: frame-ancestors 'none' (or the exact approved ancestor list) and X-Frame-Options: DENY on the operator page. Add X-Content-Type-Options: nosniff and a deliberate Referrer-Policy. Verify headers at the deployed API Gateway edge and add an automated response-header test.
+Verify the response headers at the deployed API Gateway edge and retain the automated HTTP and browser framing checks as regression coverage.
 
 ### SH-SEC-005 — AgentCore runtime error text is reflected to API callers
 
 - **Severity:** LOW
 - **Confidence:** HIGH
-- **Status:** Open
-- **Affected paths:** [agentcore.py](../src/shadow_hunter/agentcore.py#L146), [api.py](../src/shadow_hunter/api.py#L285)
+- **Status:** **Remediated locally** — the customer chat route returns a generic 502 plus trace ID and does not reflect upstream AgentCore error text. An API regression test confirms the provider message is absent.
+- **Affected paths:** [agentcore.py](../src/shadow_hunter/agentcore.py), [api.py](../src/shadow_hunter/api.py)
 
 **Evidence**
 
-When an AgentCore stream contains runtimeClientError, the adapter raises an exception containing the upstream message. The chat route returns str(exc) as the HTTP 502 detail.
+The adapter still retains typed upstream failure information internally, but the customer chat route now returns a generic HTTP 502 message with a correlation trace ID and does not include the upstream error text. A regression test injects a sensitive provider message and confirms it is absent from the response.
 
 **Impact**
 
@@ -130,45 +131,45 @@ An upstream runtime diagnostic may disclose internal service details to an authe
 
 **Recommended remediation**
 
-Return a stable generic error and correlation identifier to the caller. Keep detailed provider diagnostics in a restricted, redacted server-side log. Add tests proving arbitrary upstream messages are not reflected in the HTTP response.
+Keep the generic client-facing response and correlation identifier. Confirm that any future internal provider diagnostics are restricted and redacted; retain the regression test against arbitrary upstream message reflection.
 
 ### SH-SEC-006 — Hosted Red/Blue evaluation has no per-operator usage budget
 
 - **Severity:** MEDIUM
 - **Confidence:** HIGH
-- **Status:** Open
-- **Affected paths:** [api.py](../src/shadow_hunter/api.py#L457), [infra/app/template.yaml](../infra/app/template.yaml)
+- **Status:** **Partially mitigated** — an operator-authenticated kill switch and durable per-operator daily run quota (default 5) plus cooldown (default 60 seconds) are enforced in SQLite/DynamoDB before hosted inference. No global aggregate provider budget, cross-operator spend cap, or provider-spend alert exists yet.
+- **Affected paths:** [api.py](../src/shadow_hunter/api.py), [store.py](../src/shadow_hunter/store.py), [dynamodb_store.py](../src/shadow_hunter/dynamodb_store.py), [infra/app/template.yaml](../infra/app/template.yaml)
 
 **Evidence**
 
-The operator-only evaluation route permits up to three rounds. Each round makes one Red and one Blue hosted NVIDIA request, so a single invocation can trigger up to six model calls. API Gateway has a default global throttle and the Lambda has a reserved-concurrency limit, but no per-operator run quota, cooldown, daily call budget, or cost circuit breaker is present in the inspected route.
+The route remains bounded to three rounds per invocation (up to six hosted calls). A kill switch and durable per-operator usage reservations now exist in SQLite and DynamoDB: the default daily limit is five runs per UTC day, with a 60-second cooldown. Reservations are atomic and audited. There is still no global provider spend cap, aggregate cross-operator quota, or provider-spend alert.
 
 **Impact and precondition**
 
-A compromised operator account or an authorized operator repeatedly invoking the route can consume hosted-model quota and incur unbounded cumulative provider cost relative to the absence of a per-operator budget. The global throttle and Lambda concurrency are useful limits but are not a usage budget.
+The new controls reduce repeated use by one operator, but multiple operators can still collectively consume hosted-model quota without a global aggregate budget. The API Gateway throttle and Lambda concurrency are additional infrastructure limits, not a provider spend cap.
 
 **Recommended remediation**
 
-Add per-operator and global run quotas, daily call/token budgets, a cooldown, and a kill switch. Record provider usage metadata without retaining prompts or secrets. Alert on quota exhaustion and provider spend. Add tests for concurrent requests, quota exhaustion, retry behavior, and kill-switch enforcement.
+Add a global provider budget, cross-operator aggregate cap, usage alerts, and operational monitoring for the kill switch. Keep the existing per-operator daily reservation/cooldown and kill-switch regression tests; add concurrent multi-operator and provider-spend monitoring tests as the global control is implemented.
 
 ### SH-SEC-007 — Cognito tenant/customer claims depend on unverified attribute-write controls
 
 - **Severity:** HIGH — deployment blocker, conditional on Cognito configuration
-- **Confidence:** HIGH that the trust dependency exists; actual app-client mutability is not observable from this repository
-- **Status:** Open — must be closed before any customer-facing Cognito deployment
-- **Affected paths:** [cognito_pretoken.py](../src/shadow_hunter/cognito_pretoken.py#L17), [pre-token-generation.yaml](../infra/cognito/pre-token-generation.yaml), [auth.py](../src/shadow_hunter/auth.py#L270), [production readiness](production-deployment-readiness.md)
+- **Confidence:** HIGH that the pre-token trigger trusts these attributes; the deployed app-client mutability, user-provisioning permissions and actual issued claims have not been observed
+- **Status:** **Infrastructure-as-code remediated; deployment proof remains open**. The new identity stack defines immutable tenant/customer attributes, a customer app client without write permission for those attributes, separate operator/M2M clients, operator MFA/group, and a V3_0 pre-token trigger. Actual pool deployment, trigger association, user provisioning controls, token-exchange entitlement, and issued claims have not been verified against AWS.
+- **Affected paths:** [identity-stack.yaml](../infra/cognito/identity-stack.yaml), [cognito_pretoken.py](../src/shadow_hunter/cognito_pretoken.py), [pre-token-generation.yaml](../infra/cognito/pre-token-generation.yaml), [auth.py](../src/shadow_hunter/auth.py), [production readiness](production-deployment-readiness.md)
 
 **Evidence**
 
-The pre-token-generation function reads custom:tenant_id and custom:customer_id from Cognito user attributes and adds them to access-token claims. The checked-in Cognito SAM template accepts an existing UserPoolId, creates only the trigger Lambda and invoke permission, and does not define the user pool, app clients, or their WriteAttributes permissions.
+The original trigger-only template did not define the pool or app clients. The follow-up infra/cognito/identity-stack.yaml now defines a production User Pool with immutable tenant_id/customer_id schema attributes, administrative-only user creation, a customer app client whose WriteAttributes exclude those attributes, separate operator and M2M clients, an operator group/MFA posture, and a V3_0 trigger. These are source-level controls only; no deployed pool, live app-client configuration, or issued token was inspected.
 
 **Impact and precondition**
 
-If a customer-facing app client can write either trusted custom attribute, a user may be able to alter the identity context that Shadow Hunter uses for tenant and customer authorization. The repository contains no deployed pool configuration proving these attributes are immutable to end users.
+If deployment uses a different or manually modified pool, or provisioning paths bypass the immutable schema/admin-only process, a customer might still obtain altered tenant/customer claims. The IaC now addresses the intended configuration; the remaining risk is whether the deployed resources and actual tokens match it.
 
 **Required remediation / release gate**
 
-Use a controlled administrative provisioning process for tenant/customer attributes. Explicitly remove both custom attributes from customer app-client write permissions and prevent end-user profile mutation through other paths. Verify the operator app client, group assignment, MFA policy, and the Cognito V3_0 pre-token trigger association. Test that customer tokens cannot acquire another tenant/customer identity. Do not expose the customer API until this is evidenced against the actual user pool and issued tokens.
+Deploy the reviewed identity stack only after separate AWS approval. In staging, inspect the actual pool schema and customer WriteAttributes, verify that user provisioning is administrator-controlled, confirm the V3_0 trigger association and operator MFA/group, then issue customer/operator/OBO tokens and prove that customer-controlled flows cannot change tenant/customer claims. Keep the customer API blocked until this live evidence exists.
 
 ## Positive controls observed
 
@@ -186,37 +187,41 @@ These source observations are positive design controls, not proof that the deplo
 
 ## Release-gate verification matrix
 
-| ID | Required evidence before release | Suggested verification |
+| ID | Current status | Evidence / remaining gate |
 |---|---|---|
-| SH-SEC-001 | No customer-visible order-existence oracle | Local HTTP/MCP regression tests pass for nonexistent, cross-tenant, and cross-customer IDs; staging verification remains pending |
-| SH-SEC-002 | Maker-checker invariant or documented policy exception | Local SQLite tests and DynamoDB transaction-contract tests pass; verify the conditional transitions against live DynamoDB in staging |
-| SH-SEC-003 | Recoverable, auditable one-time approval workflow | Browser test for reload, lost response, token rotation, one-time consumption, and replay |
-| SH-SEC-004 | Operator page cannot be framed by unapproved origins | HTTP header assertions and cross-origin iframe test |
-| SH-SEC-005 | Upstream error details are not reflected | Simulate arbitrary AgentCore runtime error text and assert generic HTTP response |
-| SH-SEC-006 | Hosted evaluation has bounded cumulative usage | Per-operator quota, concurrent-call, daily-budget, and kill-switch tests |
-| SH-SEC-007 | Trusted identity attributes cannot be customer-written | Inspect actual Cognito app-client WriteAttributes, pool attributes, trigger version/association, and issued JWT claims; attempt customer self-modification in staging |
+| SH-SEC-001 | **Remediated in source** | HTTP/MCP use the shared public response normalizer; local regressions preserve detailed audit reasons. Re-run response-equivalence checks against deployed API/MCP in staging. |
+| SH-SEC-002 | **Remediated in source** | SQLite/DynamoDB approval and execution both enforce requester/approver separation and record denial evidence. Verify live DynamoDB conditions and real Cognito group separation in staging. |
+| SH-SEC-003 | **Remediated locally; browser E2E pending** | Operator-authenticated token rotation, old-hash invalidation, audit record and atomic previous-hash condition are covered by service/API/DynamoDB contract tests. Run full browser reload/recovery/execution/replay coverage. |
+| SH-SEC-004 | **Remediated locally; edge verification pending** | HTTP response-header tests and Edge iframe CSP check pass. Verify deployed API Gateway response headers. |
+| SH-SEC-005 | **Remediated locally** | AgentCore failure injection confirms the HTTP 502 does not reflect arbitrary provider error text and includes a trace ID. |
+| SH-SEC-006 | **Partially mitigated** | Per-operator daily limit, cooldown and kill switch are covered by SQLite/DynamoDB tests. Add global spend cap, aggregate quota and alerts. |
+| SH-SEC-007 | **IaC controls authored; live deployment proof open** | Identity stack defines immutable trusted attributes, restricted customer WriteAttributes, separate operator/M2M clients, MFA/group and V3_0 trigger. Inspect deployed pool, provisioning controls and issued tokens in staging. |
 
 ## Verification limitations
 
-| Check | Result |
+| Check | Current result |
 |---|---|
-| Static source inspection of API/auth/policy/gateway/approval/data paths | Performed; findings above |
-| Targeted default-branch credential-marker search | Performed; no concrete credential value surfaced; not a history scan |
-| Unit / integration / adversarial tests | Follow-ups: SH-SEC-001 focused gateway/API/MCP tests 23 passed; SH-SEC-002 approval/DynamoDB/gateway tests 22 passed; broader suite 163 passed with the Lambda-entrypoint test excluded because optional mangum is absent. |
-| Browser / header / clickjacking checks | Not run |
-| Dependency / SAST / DAST scan | Not run |
-| SAM CLI validation / cfn-lint / package build | Not run |
-| AWS identity, IAM, storage, Lambda, API Gateway, AgentCore inspection | Not run; no AWS resources created or accessed |
-| Staging cross-tenant denial + independent S3 audit verification | Not run |
+| Full Python regression/integration suite on merged main | **177 passed** (isolated Python 3.11 environment with dev/server/aws extras) |
+| Focused approval/API/DynamoDB/gateway security tests | **37 passed**; includes maker-checker, token recovery/rotation, evaluation quota and public resource-denial behavior |
+| Browser security | Microsoft Edge headless check passed for operator page response headers and iframe blocking; full recovery UI E2E and deployed edge behavior remain pending |
+| Semgrep source/security/secrets | Previously 0 findings across 22 files / 122 rules on the pre-rebase remediation tree; treat as prior-snapshot evidence, not a new scan of every merged file |
+| pip-audit | Previously no known vulnerabilities in src/requirements.txt; re-run if dependencies change |
+| Bandit | Previously 0 High / 0 Medium / 10 Low; retained as qualified prior evidence, not a certification |
+| Ruff | Earlier default ruleset reported repository-wide existing findings; no blanket autofix was applied |
+| Python compilation / repository metadata / diff | Must be recorded against the final merged state before push |
+| cfn-lint | **Passed all four production templates** on the merged tree |
+| SAM validation | sam validate --lint passed the existing-pool Cognito trigger, data and API templates; new identity stack passed basic SAM validation because bundled SAM schema lags the Cognito delegation property |
+| SAM build | Existing committed WSL2 cycle record reports sam build --no-use-container passed all four templates. A separate Windows-host API build attempt selected pywin32 for a Linux Lambda target and failed for host-platform reasons. |
+| AWS identity/IAM/resources/staging | Not inspected; no AWS resources created, deployed or changed |
+| Staging cross-tenant denial + independent S3 audit verification | Not run; requires separate AWS approval |
 
 ## Prioritized remediation sequence
 
-1. Close SH-SEC-007 by proving customer clients cannot write trusted tenant/customer attributes; complete the real Cognito configuration.
-2. **SH-SEC-002 remediated locally:** verify the same-subject denial and conditional transition against the deployed DynamoDB store in staging.
-3. **SH-SEC-001 remediated locally:** repeat the response-equivalence check against the deployed API/MCP service during staging verification.
-4. Design an audited, safe approval-token recovery flow (SH-SEC-003).
-5. Add operator response headers and sanitize AgentCore error responses (SH-SEC-004/005).
-6. Add per-operator/global inference budgets and a kill switch (SH-SEC-006).
-7. Keep verification explicitly authorized and scoped per engineering cycle; add/run regression evidence for each remaining finding and complete formal infrastructure validation.
+1. Close the SH-SEC-007 live-deployment gate by verifying the new identity stack's actual pool schema, app-client WriteAttributes, administrative provisioning path, V3_0 trigger association, operator MFA/group and issued tokens in staging.
+2. Run SH-SEC-001/002 response-equivalence and live DynamoDB maker-checker checks in staging.
+3. Complete operator UI reload/recovery/execution browser E2E and verify deployed API Gateway headers (SH-SEC-003/004).
+4. Add a global hosted-provider quota, spend cap and alerts (SH-SEC-006).
+5. Re-run browser and relevant SAST/dependency tools as appropriate against the final committed state.
+6. Obtain separate AWS approval before deployment, package uploads, live model calls, or billable resource changes.
 
 **Verdict:** source-level review is complete for this pass, but the overall security assessment and release verification remain **PARTIAL**. This document does not authorize AWS deployment.

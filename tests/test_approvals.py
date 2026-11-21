@@ -168,3 +168,55 @@ def test_approval_is_invalidated_when_policy_version_changes(flow):
             operator_id="support-user",
         )
     assert store.get_order("order-approval").refundable_minor == 30_000
+
+
+def test_refund_requester_cannot_approve_their_own_request(flow):
+    store, service, _, created = flow
+    approval_id = created["approval"]["approval_id"]
+
+    with pytest.raises(StoreError, match="cannot approve their own refund"):
+        service.approve(approval_id, "customer-user")
+
+    row = store.list_approvals(limit=10)[0]
+    assert row["status"] == "PENDING"
+    assert row.get("approver_id") is None
+
+    token = service.approve(approval_id, "independent-operator")
+    assert isinstance(token, str) and token
+    assert store.list_approvals(limit=10)[0]["status"] == "APPROVED"
+
+
+def test_approved_capability_can_be_recovered_with_audited_token_rotation(flow):
+    store, service, gateway, created = flow
+    approval_id = created["approval"]["approval_id"]
+    refund_id = created["refund_request"]["refund_request_id"]
+    original_token = service.approve(approval_id, "independent-operator")
+
+    replacement_token = service.rotate_token(approval_id, "recovery-operator")
+
+    assert replacement_token != original_token
+    with pytest.raises(GatewayError):
+        gateway.execute_approved_refund(
+            refund_request_id=refund_id,
+            approval_token=original_token,
+            operator_id="recovery-operator",
+        )
+    result = gateway.execute_approved_refund(
+        refund_request_id=refund_id,
+        approval_token=replacement_token,
+        operator_id="recovery-operator",
+    )
+    assert result["status"] == "EXECUTED"
+    events = store.get_trace_events(created["trace_id"])
+    rotation = [row for row in events if row["event_type"] == "APPROVAL_TOKEN_ROTATED"]
+    assert len(rotation) == 1
+    assert rotation[0]["actor_id"] == "recovery-operator"
+    assert original_token not in str(rotation[0]["details"])
+    assert replacement_token not in str(rotation[0]["details"])
+
+
+def test_unapproved_or_expired_capability_cannot_be_recovered(flow):
+    _, service, _, created = flow
+    approval_id = created["approval"]["approval_id"]
+    with pytest.raises(StoreError, match="approved"):
+        service.rotate_token(approval_id, "operator")

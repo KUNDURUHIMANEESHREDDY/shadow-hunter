@@ -517,6 +517,58 @@ class DynamoDBStore:
             raise StoreError("Approval is no longer pending or has expired") from exc
         return raw_token
 
+    def rotate_approval_token(self, approval_id: str, operator_id: str) -> str:
+        """Rotate an approved, unused capability and audit the recovery operator."""
+        raw_token = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+        approval = self._get_item(f"APPROVAL#{approval_id}")
+        if approval is None:
+            raise StoreError("Approval not found")
+        if approval.get("status") != "APPROVED":
+            raise StoreError("Only an approved, unused capability can be recovered")
+        now = iso_now()
+        if approval.get("expires_at", "") <= now:
+            raise StoreError("Approval has expired")
+
+        event = self._audit_item(
+            event_type="APPROVAL_TOKEN_ROTATED",
+            trace_id=approval.get("trace_id") or approval["refund_request_id"],
+            request_id=approval.get("request_id") or approval["refund_request_id"],
+            actor_id=operator_id,
+            tenant_id=approval["tenant_id"],
+            resource_id=approval["refund_request_id"],
+            action_digest=approval["action_digest"],
+            policy_id=approval["policy_id"],
+            policy_version=approval["policy_version"],
+            details={"approval_id": approval_id, "token_rotated": True},
+        )
+        actions = [
+            self._tx_update(
+                {"PK": approval["PK"], "SK": approval["SK"]},
+                update_expression="SET token_hash = :token_hash, token_rotated_at = :now",
+                condition_expression=(
+                    "#status = :approved AND expires_at > :now "
+                    "AND token_hash = :previous_token_hash"
+                ),
+                names={"#status": "status"},
+                values={
+                    ":approved": "APPROVED",
+                    ":now": now,
+                    ":token_hash": token_hash,
+                    ":previous_token_hash": approval["token_hash"],
+                },
+            ),
+            self._tx_put(event),
+            self._stats_tx({"audit_events": 1}),
+        ]
+        try:
+            self._client.transact_write_items(
+                TransactItems=[action for action in actions if action is not None]
+            )
+        except Exception as exc:
+            raise StoreError("Approval is no longer recoverable") from exc
+        return raw_token
+
     def reject(self, approval_id: str, approver_id: str, reason: str) -> None:
         approval = self._get_item(f"APPROVAL#{approval_id}")
         if approval is None:
@@ -841,6 +893,73 @@ class DynamoDBStore:
                 return False
             raise StoreError("Could not persist A2A replay guard") from exc
         return True
+
+    def reserve_agent_evaluation(
+        self,
+        operator_id: str,
+        *,
+        daily_limit: int,
+        cooldown_seconds: int,
+    ) -> None:
+        """Atomically reserve one hosted evaluation against per-operator limits."""
+        if (
+            not isinstance(operator_id, str) or not operator_id
+            or operator_id.strip() != operator_id
+            or isinstance(daily_limit, bool) or not isinstance(daily_limit, int)
+            or daily_limit < 1
+            or isinstance(cooldown_seconds, bool)
+            or not isinstance(cooldown_seconds, int) or cooldown_seconds < 0
+        ):
+            raise StoreError("Invalid operator evaluation budget configuration")
+        now = utc_now()
+        now_text = now.isoformat(timespec="microseconds")
+        cutoff = (now - timedelta(seconds=cooldown_seconds)).isoformat(
+            timespec="microseconds"
+        )
+        usage_date = now.date().isoformat()
+        operator_key = hashlib.sha256(operator_id.encode("utf-8")).hexdigest()
+        trace_id = str(uuid.uuid4())
+        usage_key = {
+            "PK": f"OPERATOR_EVAL_USAGE#{operator_key}",
+            "SK": f"DAY#{usage_date}",
+        }
+        event = self._audit_item(
+            event_type="AGENT_EVALUATION_BUDGET_RESERVED",
+            trace_id=trace_id,
+            request_id=trace_id,
+            actor_id=operator_id,
+            tenant_id="operator",
+            details={
+                "daily_limit": daily_limit,
+                "cooldown_seconds": cooldown_seconds,
+            },
+        )
+        update = self._tx_update(
+            usage_key,
+            update_expression=(
+                "SET last_run_at = :now, ttl_epoch = :ttl ADD run_count :one"
+            ),
+            condition_expression=(
+                "(attribute_not_exists(run_count) OR run_count < :limit) AND "
+                "(attribute_not_exists(last_run_at) OR last_run_at <= :cutoff)"
+            ),
+            values={
+                ":now": now_text,
+                ":ttl": int(now.timestamp()) + 2 * 86400,
+                ":one": 1,
+                ":limit": daily_limit,
+                ":cutoff": cutoff,
+            },
+        )
+        actions = [update, self._tx_put(event), self._stats_tx({"audit_events": 1})]
+        try:
+            self._client.transact_write_items(
+                TransactItems=[action for action in actions if action is not None]
+            )
+        except Exception as exc:
+            raise StoreError(
+                "Operator evaluation cooldown or daily budget is exhausted"
+            ) from exc
 
     def latest_agent_evaluation(self) -> dict[str, Any]:
         """Return the latest redacted evaluation summary and its case events."""

@@ -84,3 +84,48 @@ def test_sqlite_a2a_nonce_is_single_use_and_expires(tmp_path):
         message_id="message-three",
         expires_at_epoch=1,
     )
+
+
+def test_operator_evaluation_budget_enforces_cooldown_and_daily_limit(tmp_path):
+    import pytest
+
+    from shadow_hunter.store import StoreError
+
+    store = SQLiteStore(tmp_path / "evaluation-budget.sqlite3")
+    store.reserve_agent_evaluation(
+        "operator-1", daily_limit=2, cooldown_seconds=3600
+    )
+    with pytest.raises(StoreError, match="cooldown"):
+        store.reserve_agent_evaluation(
+            "operator-1", daily_limit=2, cooldown_seconds=3600
+        )
+
+    # A separate operator has an independent budget.
+    store.reserve_agent_evaluation(
+        "operator-2", daily_limit=1, cooldown_seconds=3600
+    )
+    with pytest.raises(StoreError, match="daily evaluation budget"):
+        store.reserve_agent_evaluation(
+            "operator-2", daily_limit=1, cooldown_seconds=0
+        )
+
+
+def test_operator_evaluation_budget_resets_on_next_utc_date(tmp_path, monkeypatch):
+    from datetime import datetime, timezone
+    import shadow_hunter.store as store_module
+
+    store = SQLiteStore(tmp_path / "evaluation-budget-reset.sqlite3")
+    class Clock:
+        value = datetime(2026, 11, 20, 12, tzinfo=timezone.utc)
+        def __call__(self):
+            return self.value
+    clock = Clock()
+    monkeypatch.setattr(store_module, "utc_now", clock)
+
+    store.reserve_agent_evaluation(
+        "operator-1", daily_limit=1, cooldown_seconds=0
+    )
+    clock.value = datetime(2026, 11, 21, 12, tzinfo=timezone.utc)
+    store.reserve_agent_evaluation(
+        "operator-1", daily_limit=1, cooldown_seconds=0
+    )
