@@ -112,11 +112,24 @@ def test_nim_client_uses_selected_nvidia_base_url_and_hosted_chat_endpoint(monke
     assert captured["body"]["model"] == DEFAULT_RED_MODEL
     assert "response_format" not in captured["body"]
     assert captured["body"]["chat_template_kwargs"] == {
-        "enable_thinking": True,
-        "reasoning_budget": 64,
+        "enable_thinking": False,
     }
     assert captured["body"]["stream"] is False
     assert captured["timeout"] == 3
+
+
+def test_nim_client_applies_an_adaptive_environment_timeout_cap(monkeypatch):
+    monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test-secret")
+    monkeypatch.setenv("SHADOW_HUNTER_NIM_TIMEOUT_SECONDS", "8")
+    monkeypatch.setenv("SHADOW_HUNTER_NIM_MAX_TOKENS", "512")
+    monkeypatch.delenv("SHADOW_HUNTER_NIM_API_KEY_SECRET_ARN", raising=False)
+
+    client = NIMChatClient.from_environment(timeout_cap_seconds=4)
+
+    assert client.timeout_seconds == 4.0
+
+    with pytest.raises(NIMConfigurationError, match="between 1 and 12"):
+        NIMChatClient("nvapi-test-secret", timeout_seconds=12.1)
 
 
 def test_nim_client_disables_redirects():
@@ -250,6 +263,12 @@ def test_red_strategy_selects_only_a_known_scenario_and_mutates_text_only():
     plan = planner.plan([scenario], previous_observations=(), seed=7)
     mutated = planner.apply(scenario, plan)
 
+    assert client.calls[0]["max_tokens"] == 384
+    assert client.calls[0]["response_schema"]["properties"]["scenario_id"]["enum"] == [
+        scenario.scenario_id
+    ]
+    assert client.calls[0]["response_schema"]["additionalProperties"] is False
+    assert "reasoning_budget" not in client.calls[0]
     assert mutated.scenario_id == scenario.scenario_id
     assert mutated.tool_name == scenario.tool_name
     assert mutated.arguments["amount_minor"] == scenario.arguments["amount_minor"]
