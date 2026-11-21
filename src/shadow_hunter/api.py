@@ -41,6 +41,7 @@ from .store import SQLiteStore, StoreError
 
 
 WEB_ROOT = Path(__file__).parent / "web"
+NIM_EVALUATION_TIMEOUT_BUDGET_SECONDS = 24.0
 
 
 def _bearer(authorization: str | None) -> str | None:
@@ -315,8 +316,9 @@ def create_app(
         operator_id = operator(authorization)
         if set(body) - {"rounds"}:
             raise HTTPException(status_code=422, detail="Only rounds is accepted")
-        # The synchronous API Gateway integration is capped at 30 seconds.
-        # Two bounded NIM requests per round must fit within that request window.
+        # The Lambda has a 28-second timeout. Reserve four seconds for local
+        # sandbox, policy, and audit work; divide the remaining 24-second NIM
+        # budget across the two sequential hosted-model calls in each round.
         max_rounds = 3
         rounds = body.get("rounds", max_rounds)
         if isinstance(rounds, bool) or not isinstance(rounds, int) or not 1 <= rounds <= max_rounds:
@@ -328,7 +330,10 @@ def create_app(
             agent_authenticator = AgentAuthenticator.from_environment()
             red_key_id = agent_authenticator.key_id_for_agent("red-agent")
             blue_key_id = agent_authenticator.key_id_for_agent("blue-agent")
-            nim_client = NIMChatClient.from_environment()
+            nim_timeout_cap = NIM_EVALUATION_TIMEOUT_BUDGET_SECONDS / (2 * rounds)
+            nim_client = NIMChatClient.from_environment(
+                timeout_cap_seconds=nim_timeout_cap
+            )
             red_strategy_planner = NIMRedStrategyPlanner.from_environment(nim_client)
         except (A2AConfigurationError, NIMConfigurationError) as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
