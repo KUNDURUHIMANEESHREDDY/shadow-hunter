@@ -50,10 +50,10 @@
   <section class="panel" id="agent-evaluation">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap">
       <div>
-        <h2>Red/Blue autonomous security evaluation</h2>
-        <p>Bounded multi-round evaluation in an isolated synthetic-data sandbox. HMAC agent keys must be configured on the server.</p>
+        <h2>Red/Blue hosted NVIDIA NIM evaluation</h2>
+        <p>Red: Nemotron 3.5 Lightning 30B A3B · Blue: Nemotron 3.5 Bolt E4B. Server NIM and HMAC credentials required. Synthetic data only; deterministic policy remains authoritative.</p>
       </div>
-      <button id="run-agent-evaluation">Run 8-round evaluation</button>
+      <button id="run-agent-evaluation">Run 3-round NIM evaluation</button>
     </div>
     <div class="grid" id="agent-eval-metrics" style="margin-top:16px;margin-bottom:8px">
       <div class="metric"><span>Attack attempts</span><strong>—</strong></div>
@@ -63,8 +63,8 @@
       <div class="metric"><span>Policy accuracy</span><strong>—</strong></div>
     </div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Round</th><th>Strategy</th><th>Scenario</th><th>Decision</th><th>Risk</th><th>Threat categories</th><th>Outcome</th></tr></thead>
-      <tbody id="agent-eval-results"><tr><td colspan="7" class="muted">Connect to load the latest evaluation.</td></tr></tbody>
+      <thead><tr><th>Round</th><th>Red strategy</th><th>Scenario</th><th>Blue model</th><th>Decision</th><th>Risk</th><th>Threat categories</th><th>Blue analysis</th><th>Outcome</th></tr></thead>
+      <tbody id="agent-eval-results"><tr><td colspan="9" class="muted">Connect to load the latest evaluation.</td></tr></tbody>
     </table></div>
   </section>
   <section class="panel" id="trace-panel" hidden>
@@ -125,7 +125,7 @@
   function renderAgentEvaluation(snapshot) {
     const run = snapshot && snapshot.run;
     if (!run) {
-      $("agent-eval-results").innerHTML = '<tr><td colspan="7" class="muted">No evaluation has been run yet.</td></tr>';
+      $("agent-eval-results").innerHTML = '<tr><td colspan="9" class="muted">No evaluation has been run yet.</td></tr>';
       return;
     }
     const details = run.details || {};
@@ -141,17 +141,20 @@
     ).join("");
     const rows = snapshot.results || [];
     $("agent-eval-results").innerHTML = rows.map(row => {
-      const outcome = row.attack_success ? "ATTACK ACCEPTED" :
-        (row.passed ? (row.is_attack ? "PREVENTED" : "CONTROL PASSED") : "EXPECTATION MISSED");
-      const outcomeClass = row.attack_success ? "DENY" : (row.passed ? "ALLOW" : "ESCALATE");
-      return '<tr><td>' + escapeHtml(row.details?.round ?? row.round ?? "—") +
-        '</td><td>' + escapeHtml(row.details?.strategy_id ?? row.strategy_id ?? "—") +
-        '</td><td>' + escapeHtml(row.details?.scenario_id ?? row.resource_id ?? "—") +
-        '</td><td><span class="pill ' + escapeHtml(row.decision || "") + '">' + escapeHtml(row.decision || "—") +
-        '</span></td><td>' + escapeHtml(row.details?.risk_score ?? row.risk_score ?? "—") +
-        '</td><td>' + escapeHtml((row.details?.threat_categories || row.threat_categories || []).join(", ")) +
+      const detail = row.details || row;
+      const outcome = detail.attack_success ? "ATTACK ACCEPTED" :
+        (detail.passed ? (detail.is_attack ? "PREVENTED" : "CONTROL PASSED") : "EXPECTATION MISSED");
+      const outcomeClass = detail.attack_success ? "DENY" : (detail.passed ? "ALLOW" : "ESCALATE");
+      return '<tr><td>' + escapeHtml(detail.round ?? "—") +
+        '</td><td><strong>' + escapeHtml(detail.strategy_id ?? "—") + '</strong><div class="muted">' + escapeHtml(detail.strategy_summary ?? "") +
+        '</div></td><td>' + escapeHtml(detail.scenario_id ?? row.resource_id ?? "—") +
+        '</td><td>' + escapeHtml(detail.defense_model ?? "—") +
+        '</td><td><span class="pill ' + escapeHtml(row.decision || detail.decision || "") + '">' + escapeHtml(row.decision || detail.decision || "—") +
+        '</span></td><td>' + escapeHtml(detail.risk_score ?? "—") +
+        '</td><td>' + escapeHtml((detail.threat_categories || []).join(", ")) +
+        '</td><td>' + escapeHtml(detail.analysis_summary ?? "") +
         '</td><td><span class="pill ' + outcomeClass + '">' + outcome + '</span></td></tr>';
-    }).join("") || '<tr><td colspan="7" class="muted">No scenario outcomes.</td></tr>';
+    }).join("") || '<tr><td colspan="9" class="muted">No scenario outcomes.</td></tr>';
   }
   function renderAudit(rows) {
     $("audit").innerHTML = rows.map(row => '<tr><td>' + escapeHtml((row.created_at || "").replace("T"," ").slice(0,19)) + '</td><td>' + escapeHtml(row.event_type) + '</td><td><span class="pill ' + escapeHtml(row.decision || "") + '">' + escapeHtml(row.decision || "—") + '</span></td><td>' + escapeHtml(row.reason_code || "—") + '</td><td>' + escapeHtml(row.actor_id || "—") + '</td><td><button class="secondary" data-trace="' + escapeHtml(row.trace_id || "") + '">' + escapeHtml((row.trace_id || "").slice(0,12)) + '…</button></td></tr>').join("") || '<tr><td colspan="6" class="muted">No audit events yet.</td></tr>';
@@ -175,17 +178,17 @@
     try {
       const result = await api("/v1/operator/agent-evaluations/run", {
         method: "POST",
-        body: JSON.stringify({rounds: 8})
+        body: JSON.stringify({rounds: 3})
       });
       await load();
-      setMessage("Evaluation " + result.run_id.slice(0, 12) + "… completed: " +
+      setMessage("Hosted NVIDIA NIM evaluation " + result.run_id.slice(0, 12) + "… completed: " +
         result.attacks_prevented + "/" + result.attack_attempts +
         " attacks prevented; success rate " + percent(result.attack_success_rate) + ".");
     } catch (error) {
       setMessage(error.message, true);
     } finally {
       button.disabled = false;
-      button.textContent = "Run 8-round evaluation";
+      button.textContent = "Run 3-round NIM evaluation";
     }
   });
   $("approvals").addEventListener("click", async event => {

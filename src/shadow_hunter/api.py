@@ -21,6 +21,7 @@ from .agents import (
     A2AProtocolError,
     AgentAuthenticator,
     AdversarialStrategyEngine,
+    BlueAgent,
     EvaluationMetrics,
     RedBlueSimulation,
 )
@@ -28,6 +29,13 @@ from .approvals import ApprovalService
 from .auth import build_authenticator_from_environment
 from .gateway import GatewayError, ToolGateway
 from .mcp_server import build_mcp_runtime
+from .nim import (
+    NIMBlueDefenseReasoner,
+    NIMChatClient,
+    NIMConfigurationError,
+    NIMInferenceError,
+    NIMRedStrategyPlanner,
+)
 from .policy import PolicyConfig, PolicyEngine, Principal
 from .store import SQLiteStore, StoreError
 
@@ -307,14 +315,22 @@ def create_app(
         operator_id = operator(authorization)
         if set(body) - {"rounds"}:
             raise HTTPException(status_code=422, detail="Only rounds is accepted")
-        rounds = body.get("rounds", 8)
-        if isinstance(rounds, bool) or not isinstance(rounds, int) or not 1 <= rounds <= 20:
-            raise HTTPException(status_code=422, detail="rounds must be an integer between 1 and 20")
+        # The synchronous API Gateway integration is capped at 30 seconds.
+        # Two bounded NIM requests per round must fit within that request window.
+        max_rounds = 3
+        rounds = body.get("rounds", max_rounds)
+        if isinstance(rounds, bool) or not isinstance(rounds, int) or not 1 <= rounds <= max_rounds:
+            raise HTTPException(
+                status_code=422,
+                detail=f"rounds must be an integer between 1 and {max_rounds}",
+            )
         try:
             agent_authenticator = AgentAuthenticator.from_environment()
             red_key_id = agent_authenticator.key_id_for_agent("red-agent")
             blue_key_id = agent_authenticator.key_id_for_agent("blue-agent")
-        except A2AConfigurationError as exc:
+            nim_client = NIMChatClient.from_environment()
+            red_strategy_planner = NIMRedStrategyPlanner.from_environment(nim_client)
+        except (A2AConfigurationError, NIMConfigurationError) as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
         run_id = str(uuid4())
@@ -354,6 +370,13 @@ def create_app(
                     ),
                     ApprovalService(evaluation_store, ttl_seconds=approval_ttl),
                 )
+                blue_defense_reasoner = NIMBlueDefenseReasoner.from_environment(
+                    nim_client, evaluation_gateway.policy
+                )
+                blue_agent = BlueAgent(
+                    evaluation_gateway,
+                    reasoner=blue_defense_reasoner,
+                )
                 strategies = AdversarialStrategyEngine.for_refund_workload(
                     own_order_id="evaluation-order-own",
                     foreign_order_id="evaluation-order-foreign",
@@ -370,6 +393,8 @@ def create_app(
                     # The persistent store makes nonce replay detection survive
                     # across operator-triggered runs and application workers.
                     nonce_store=store,
+                    blue_agent=blue_agent,
+                    red_strategy_planner=red_strategy_planner,
                 )
                 observations = simulation.run_autonomous_loop(
                     strategies,
@@ -385,6 +410,8 @@ def create_app(
                     "threat_categories", "recommended_action", "message_id",
                     "sender_id", "recipient_id", "message_type", "key_id",
                     "authenticated", "tool_name", "agent_id",
+                    "strategy_summary", "strategy_seed", "analysis_summary",
+                    "defense_model", "defense_seed",
                 }
                 for observation in observations:
                     for event in evaluation_store.get_trace_events(observation.trace_id):
@@ -406,7 +433,14 @@ def create_app(
                                 if key in source_details
                             },
                         })
-        except (A2AProtocolError, A2AConfigurationError, StoreError, ValueError) as exc:
+        except (
+            A2AProtocolError,
+            A2AConfigurationError,
+            NIMConfigurationError,
+            NIMInferenceError,
+            StoreError,
+            ValueError,
+        ) as exc:
             raise HTTPException(
                 status_code=503,
                 detail="Agent evaluation could not complete safely",
@@ -422,7 +456,10 @@ def create_app(
             details={
                 **summary,
                 "run_id": run_id,
-                "runtime": "local_deterministic",
+                "runtime": "hosted_nvidia_nim",
+                "provider": "nvidia_nim",
+                "red_model": red_strategy_planner.model,
+                "blue_model": blue_defense_reasoner.model,
                 "sandbox": "isolated_synthetic_sqlite",
                 "rounds_requested": rounds,
                 "agent_authentication": "hmac_sha256",
@@ -460,6 +497,11 @@ def create_app(
                 "risk_score": observation.risk_score,
                 "threat_categories": list(observation.threat_categories),
                 "recommended_action": observation.recommended_action,
+                "strategy_summary": observation.strategy_summary,
+                "strategy_seed": observation.strategy_seed,
+                "analysis_summary": observation.analysis_summary,
+                "defense_model": observation.defense_model,
+                "defense_seed": observation.defense_seed,
                 "attack_prevented": observation.attack_prevented,
                 "attack_success": observation.attack_success,
                 "passed": observation.passed,

@@ -139,3 +139,39 @@ The model sees read tools only. A separate write probe targets a disposable
 order-demo record and uses a unique idempotency key; it never calls the
 operator refund execution route. If AgntID fails to block the probe, it can
 create only a pending sandbox approval, not execute a refund.
+
+
+## Hosted model-provider boundary for Red/Blue evaluation
+
+- Only the operator-triggered Red/Blue evaluation calls NVIDIA's hosted NIM
+  endpoint. The separate AgntID/Ollama demo is not imported or invoked by this
+  execution path.
+- Every evaluation prompt is built from synthetic records in a disposable
+  SQLite sandbox. Do not reuse this reasoning adapter for live customer
+  conversations or production order context without a separate privacy,
+  data-residency, retention and vendor-terms review.
+- NVIDIA API keys and the two A2A signing keys are server secrets. Local
+  development reads environment variables. AWS deployment reads only the
+  configured Secrets Manager ARNs and grants `secretsmanager:GetSecretValue`
+  for those exact ARNs. Never place the key in prompts, result records,
+  exceptions, frontend code, or source control.
+- Red output is attacker-controlled. Its schema allows only a known scenario
+  ID, a bounded hypothesis string and bounded natural-language injection text.
+  The selected scenario's tool, resource, monetary parameters, expected result
+  and control status remain application-owned. Invalid selections or output
+  abort the evaluation.
+- Blue output is also untrusted. The application validates the JSON schema,
+  category and recommendation enums, indicator identifiers, score range and
+  summary length. Model categories are unioned with deterministic findings,
+  and the risk score cannot drop below the deterministic score.
+- Blue's recommendation is advisory. A model suggestion to allow or deny never
+  controls the gateway result. The authenticated principal, tenant ownership,
+  tool allowlist, policy and separate approval checks remain outside the model.
+- NIM requests use fixed HTTPS host/path, bounded input and output sizes,
+  non-streaming completion, a request timeout, bounded rounds and provider
+  seeds. No automatic retries or local fallback occur. Timeout, 429, non-2xx,
+  malformed output and invalid schema fail the evaluation. Operators should
+  monitor provider quotas and invocation cost before increasing the run limit.
+- NVIDIA reports seed reproducibility as best-effort. Model-serving changes can
+  affect repeatability; stored model identifiers, seeds, scenario IDs and
+  summaries are evidence for replay, not a determinism guarantee.

@@ -50,6 +50,18 @@ Parameters:
     Type: String
     Default: ''
     Description: Optional deployed AgentCore Harness ARN.
+  NvidiaApiKeySecretArn:
+    Type: String
+    Default: ''
+    Description: Secrets Manager ARN whose SecretString is the NVIDIA API key or JSON containing NVIDIA_API_KEY.
+  A2AKeysSecretArn:
+    Type: String
+    Default: ''
+    Description: Secrets Manager ARN whose SecretString is the distinct Red/Blue HMAC key JSON object.
+
+Conditions:
+  HasNvidiaApiKeySecret: !Not [!Equals [!Ref NvidiaApiKeySecretArn, '']]
+  HasA2AKeysSecret: !Not [!Equals [!Ref A2AKeysSecretArn, '']]
 
 Resources:
   ShadowHunterLambdaLogs:
@@ -128,6 +140,12 @@ Resources:
           SHADOW_HUNTER_REFUND_LIMIT_MINOR: !Sub '${RefundLimitMinor}'
           SHADOW_HUNTER_APPROVAL_TTL_SECONDS: !Sub '${ApprovalTtlSeconds}'
           SHADOW_HUNTER_HARNESS_ARN: !Ref HarnessArn
+          SHADOW_HUNTER_NIM_API_KEY_SECRET_ARN: !Ref NvidiaApiKeySecretArn
+          SHADOW_HUNTER_A2A_KEYS_SECRET_ARN: !Ref A2AKeysSecretArn
+          SHADOW_HUNTER_NIM_RED_MODEL: nvidia/nemotron-3.5-lightning-30b-a3b
+          SHADOW_HUNTER_NIM_BLUE_MODEL: nvidia/nemotron-3.5-bolt-e4b
+          SHADOW_HUNTER_NIM_TIMEOUT_SECONDS: '3'
+          SHADOW_HUNTER_NIM_MAX_TOKENS: '512'
           SHADOW_HUNTER_DEMO_MODE: 'false'
       Policies:
         - AWSLambdaBasicExecutionRole
@@ -144,6 +162,26 @@ Resources:
               Resource:
                 - !Ref DynamoDBTableArn
                 - !Sub '${DynamoDBTableArn}/index/GSI1'
+        - !If
+          - HasNvidiaApiKeySecret
+          - Version: '2012-10-17'
+            Statement:
+              - Sid: ReadNvidiaNimApiKey
+                Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref NvidiaApiKeySecretArn
+          - !Ref AWS::NoValue
+        - !If
+          - HasA2AKeysSecret
+          - Version: '2012-10-17'
+            Statement:
+              - Sid: ReadA2AAgentKeys
+                Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref A2AKeysSecretArn
+          - !Ref AWS::NoValue
       Events:
         Health:
           Type: HttpApi

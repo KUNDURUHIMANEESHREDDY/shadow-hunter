@@ -106,41 +106,57 @@ SQLite remains the default local/demo adapter. Set SHADOW_HUNTER_STORE_BACKEND=d
 Do not deploy, create paid AWS resources, or modify credentials without explicit owner approval.
 
 
-## Autonomous local Red/Blue evaluation runtime
+## Hosted NVIDIA NIM Red/Blue evaluation runtime
 
-The Red/Blue runtime is an in-process deterministic strategy-and-reasoning harness in
-src/shadow_hunter/agents.py. It does not call an LLM or model-provider API.
+The operator-triggered Red/Blue evaluator in `src/shadow_hunter/agents.py`,
+`src/shadow_hunter/nim.py`, and `src/shadow_hunter/api.py` uses two hosted
+NVIDIA NIM models. It does not use Ollama or any local inference runtime.
 
-- Red uses AdversarialStrategyEngine to select a bounded pool of ownership,
-  privilege-escalation, prompt-injection, parameter-tampering, type-confusion,
-  approval-boundary, and legitimate-control scenarios. An observed policy-level
-  attack acceptance increases that strategy family's priority on a later cycle.
-- Blue uses BlueDefenseReasoner to classify untrusted proposal signals, assign a
-  heuristic risk score, and recommend a handling action. This assessment is
-  explanatory, not an authorization decision.
-- Every Blue proposal is submitted to the existing ToolGateway. The deterministic
-  PolicyEngine remains the final authority, and the refund execution tool remains
-  unavailable to agents.
-- Red and Blue messages are HMAC-SHA256 signed using separate agent-specific keys.
-  Verification checks configured sender identity, recipient, timestamp window,
-  payload integrity, and a single-use nonce. Nonce claims persist in SQLite or
-  DynamoDB so a replay is rejected across application workers.
-- The operator can trigger a bounded 1–20 round run. The run uses synthetic
-  customer/order records in a temporary SQLite database. Aggregate metrics,
-  redacted per-case outcomes, and allowlisted A2A/policy trace metadata are
-  written to the primary audit store; raw messages, signatures, and secrets are not.
-- The operator console reports attack success rate, defensive effectiveness,
-  false-denial rate, expected policy-decision accuracy, and per-case reasoning
-  evidence.
+- Red uses `nvidia/nemotron-3.5-lightning-30b-a3b` through NVIDIA's hosted
+  OpenAI-compatible chat completion API. It selects only from the existing
+  bounded attack/control scenario catalogue. It may modify scenario description
+  and an existing natural-language `reason` value; tool names, order IDs,
+  amounts, currencies, expected policy outcomes, and control-case data remain
+  fixed by application code.
+- Blue uses `nvidia/nemotron-3.5-bolt-e4b`. It receives the synthetic proposal,
+  trusted sandbox ownership facts, and deterministic preflight findings. It
+  returns schema-validated risk, threat categories, indicators and a short
+  explanation. The model can add signals but cannot remove deterministic
+  findings.
+- Both agents use the fixed NVIDIA API base URL
+  `https://integrate.api.nvidia.com/v1`, with requests sent to
+  `/chat/completions`. Red's JSON response is strictly validated in code;
+  Blue uses NVIDIA's JSON-schema response format.
+- Model IDs and per-round seeds are saved with redacted results. NVIDIA
+  documents seed repeatability as best-effort; hosted model updates and serving
+  changes can still produce different outputs. The seeds aid replay and
+  comparison but do not guarantee bit-for-bit determinism.
+- The synchronous operator endpoint is capped at three rounds. Each round makes
+  one bounded request to each hosted model. Requests have a short timeout and
+  strict prompt, response-size and output-token limits. Missing credentials,
+  invalid output, timeouts, provider errors and rate limits fail the run; there
+  is no local-model fallback.
+- The evaluation still uses a disposable SQLite database populated only with
+  synthetic customers and orders. No live customer or production order content
+  is sent to NVIDIA. Aggregate metrics, model metadata, per-round seeds,
+  validated summaries and allowlisted policy trace metadata are written to the
+  primary audit store; raw prompts, API keys, HMAC secrets and message
+  signatures are not copied.
+- The existing HMAC-SHA256 A2A envelopes authenticate Red-to-Blue proposals and
+  Blue-to-Red responses. Nonces remain persistent across runs in SQLite or
+  DynamoDB.
+- Every proposal is submitted to the existing `ToolGateway`. The deterministic
+  `PolicyEngine` remains the only authorization authority. Neither Red nor
+  Blue can grant permissions, skip the gateway, or invoke the operator-only
+  refund execution operation. Human approval remains separately enforced.
+- The operator console shows the Red strategy summary, Blue model ID, risk,
+  threat categories and Blue's short analysis next to the gateway decision.
 
-The HMAC envelope authenticates messages among processes that share configured
-secrets; it is not a remote network transport, public-key identity system, or
-replacement for TLS/mTLS. The current runtime is a deterministic autonomous
-evaluation loop, not two LLM-driven agents. Risk scores are heuristic and must
-not be interpreted as calibrated probabilities.
+The local `shadow-hunter-agntid-demo` Ollama runner is a separate MCP integration
+demonstration. It is not called by this Red/Blue evaluator.
 
-See docs/agent-evaluation.md for key configuration, metric definitions, and
-operator usage.
+See `docs/agent-evaluation.md` for credentials, defaults, limits, metrics and
+the current verification status.
 
 ## AgntID-facing MCP server
 

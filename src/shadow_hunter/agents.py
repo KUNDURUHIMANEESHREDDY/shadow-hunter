@@ -1,8 +1,8 @@
-"""Authenticated local Red/Blue agent runtime and bounded security evaluation.
+"""Authenticated Red/Blue protocol, deterministic policy core and evaluation loop.
 
-The runtime uses deterministic strategy and defense engines so evaluations do
-not require a paid model API. Agent proposals remain untrusted; all proposed
-tools are authorized by the existing deterministic ToolGateway.
+Hosted reasoning adapters are defined separately. Agent proposals and model
+outputs remain untrusted; proposed tools are authorized by the deterministic
+ToolGateway, never by an agent model.
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import os
 import re
 import time
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 from uuid import uuid4
 
@@ -32,6 +32,7 @@ MAX_EVALUATION_ROUNDS = 20
 _MAX_DESCRIPTION_CHARS = 1_000
 
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+_MODEL_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_./:-]{0,159}$")
 _SCENARIO_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _CURRENCY = re.compile(r"^[A-Z]{3}$")
 _INJECTION_MARKERS = (
@@ -138,6 +139,26 @@ class SignedAgentMessage:
     signature: str
 
 
+def _load_a2a_secret(secret_arn: str, region: str) -> str:
+    try:
+        import boto3
+
+        response = boto3.client(
+            "secretsmanager",
+            region_name=region or None,
+        ).get_secret_value(SecretId=secret_arn)
+    except Exception as exc:
+        raise A2AConfigurationError(
+            "Could not load the configured A2A keys from Secrets Manager"
+        ) from exc
+    value = response.get("SecretString")
+    if not isinstance(value, str) or not value.strip():
+        raise A2AConfigurationError(
+            "The configured A2A secret must contain SecretString"
+        )
+    return value.strip()
+
+
 class AgentAuthenticator:
     """Authenticate each agent with its own HMAC key and durable replay guard.
 
@@ -184,8 +205,18 @@ class AgentAuthenticator:
     def from_environment(cls) -> "AgentAuthenticator":
         raw = os.environ.get("SHADOW_HUNTER_A2A_KEYS", "").strip()
         if not raw:
+            secret_arn = os.environ.get(
+                "SHADOW_HUNTER_A2A_KEYS_SECRET_ARN", ""
+            ).strip()
+            if secret_arn:
+                region = (
+                    os.environ.get("AWS_REGION", "")
+                    or os.environ.get("AWS_DEFAULT_REGION", "")
+                )
+                raw = _load_a2a_secret(secret_arn, region)
+        if not raw:
             raise A2AConfigurationError(
-                "SHADOW_HUNTER_A2A_KEYS is not configured; Red/Blue evaluation is disabled"
+                "Set SHADOW_HUNTER_A2A_KEYS or SHADOW_HUNTER_A2A_KEYS_SECRET_ARN"
             )
         try:
             values = json.loads(raw)
@@ -349,6 +380,8 @@ class AttackScenario:
     expected_reason_code: str | None = None
     strategy_id: str = "generic"
     is_attack: bool = True
+    model_strategy_summary: str = ""
+    model_strategy_seed: int | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.scenario_id, str) or not _SCENARIO_ID.fullmatch(
@@ -377,6 +410,17 @@ class AttackScenario:
             self.is_attack, bool
         ):
             raise A2AProtocolError("scenario strategy metadata is invalid")
+        if (
+            not isinstance(self.model_strategy_summary, str)
+            or len(self.model_strategy_summary) > 320
+        ):
+            raise A2AProtocolError("model strategy summary is invalid")
+        if self.model_strategy_seed is not None and (
+            isinstance(self.model_strategy_seed, bool)
+            or not isinstance(self.model_strategy_seed, int)
+            or self.model_strategy_seed < 0
+        ):
+            raise A2AProtocolError("model strategy seed is invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -387,6 +431,19 @@ class DefenseAssessment:
     threat_categories: tuple[str, ...]
     indicators: tuple[str, ...]
     recommended_action: str
+    analysis_summary: str = "Deterministic heuristic assessment."
+    model_name: str = "deterministic_rules"
+    model_seed: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class RedStrategyPlan:
+    """Validated hosted Red plan that can only choose a catalogued scenario."""
+
+    scenario_id: str
+    attack_hypothesis: str
+    injection_text: str
+    seed: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -408,10 +465,15 @@ class AttackObservation:
     risk_score: int
     threat_categories: tuple[str, ...]
     recommended_action: str
+    analysis_summary: str
+    defense_model: str
+    strategy_summary: str
+    defense_seed: int
+    strategy_seed: int | None
 
 
 class BlueDefenseReasoner:
-    """Local rule-based defense reasoning; policy enforcement remains external."""
+    """Deterministic preflight defense signals; policy enforcement remains external."""
 
     def __init__(self, policy: PolicyEngine) -> None:
         self.policy = policy
@@ -518,6 +580,10 @@ class BlueDefenseReasoner:
             threat_categories=tuple(dict.fromkeys(categories)),
             indicators=tuple(dict.fromkeys(indicators)),
             recommended_action=recommended,
+            analysis_summary=(
+                "Deterministic checks: " + ", ".join(dict.fromkeys(categories))
+            )[:320],
+            model_name="deterministic_rules",
         )
 
 
@@ -543,6 +609,8 @@ class RedAgent:
                 "description": scenario.description,
                 "tool_name": scenario.tool_name,
                 "arguments": dict(scenario.arguments),
+                "strategy_summary": scenario.model_strategy_summary,
+                "strategy_seed": scenario.model_strategy_seed,
             },
         )
 
@@ -582,6 +650,9 @@ class RedAgent:
             "risk_score",
             "threat_categories",
             "recommended_action",
+            "analysis_summary",
+            "defense_model",
+            "defense_seed",
         }
         if set(payload) != required:
             raise A2AProtocolError("defense result has an invalid payload")
@@ -598,6 +669,9 @@ class RedAgent:
         categories = payload.get("threat_categories")
         action_digest = payload.get("action_digest")
         recommended_action = payload.get("recommended_action")
+        analysis_summary = payload.get("analysis_summary")
+        defense_model = payload.get("defense_model")
+        defense_seed = payload.get("defense_seed")
         if isinstance(risk_score, bool) or not isinstance(risk_score, int) or not 0 <= risk_score <= 100:
             raise A2AProtocolError("defense result risk_score is invalid")
         if not isinstance(categories, list) or any(
@@ -611,6 +685,26 @@ class RedAgent:
             raise A2AProtocolError("defense result action_digest is invalid")
         if not _valid_identifier(recommended_action):
             raise A2AProtocolError("defense result recommended_action is invalid")
+        if not isinstance(analysis_summary, str) or len(analysis_summary) > 320:
+            raise A2AProtocolError("defense result analysis_summary is invalid")
+        if (
+            not isinstance(defense_model, str)
+            or not _MODEL_IDENTIFIER.fullmatch(defense_model)
+        ):
+            raise A2AProtocolError("defense result defense_model is invalid")
+        if (
+            isinstance(defense_seed, bool)
+            or not isinstance(defense_seed, int)
+            or not 0 <= defense_seed <= 0xFFFFFFFF
+        ):
+            raise A2AProtocolError("defense result defense_seed is invalid")
+        strategy_seed = proposal.payload.get("strategy_seed")
+        if strategy_seed is not None and (
+            isinstance(strategy_seed, bool)
+            or not isinstance(strategy_seed, int)
+            or not 0 <= strategy_seed <= 0xFFFFFFFF
+        ):
+            raise A2AProtocolError("proposal strategy_seed is invalid")
 
         passed = decision is scenario.expected_decision and (
             scenario.expected_reason_code is None
@@ -633,6 +727,11 @@ class RedAgent:
             risk_score=risk_score,
             threat_categories=tuple(categories),
             recommended_action=recommended_action,
+            analysis_summary=analysis_summary,
+            defense_model=defense_model,
+            strategy_summary=scenario.model_strategy_summary,
+            defense_seed=defense_seed,
+            strategy_seed=strategy_seed,
         )
 
 
@@ -665,7 +764,10 @@ class BlueAgent:
             raise A2AProtocolError("message is not an authorized Red-to-Blue proposal")
 
         payload = message.payload
-        if set(payload) != {"scenario_id", "description", "tool_name", "arguments"}:
+        if set(payload) != {
+            "scenario_id", "description", "tool_name", "arguments",
+            "strategy_summary", "strategy_seed"
+        }:
             raise A2AProtocolError("attack proposal has an invalid payload")
         scenario_id = payload.get("scenario_id")
         description = payload.get("description")
@@ -680,6 +782,16 @@ class BlueAgent:
             raise A2AProtocolError("attack proposal description is invalid")
         if not _valid_identifier(tool_name):
             raise A2AProtocolError("attack proposal tool_name is invalid")
+        strategy_summary = payload.get("strategy_summary")
+        if not isinstance(strategy_summary, str) or len(strategy_summary) > 320:
+            raise A2AProtocolError("attack proposal strategy_summary is invalid")
+        strategy_seed = payload.get("strategy_seed")
+        if strategy_seed is not None and (
+            isinstance(strategy_seed, bool)
+            or not isinstance(strategy_seed, int)
+            or not 0 <= strategy_seed <= 0xFFFFFFFF
+        ):
+            raise A2AProtocolError("attack proposal strategy_seed is invalid")
         arguments = _json_object(payload.get("arguments"), label="tool arguments")
 
         defense = self.reasoner.assess(payload=payload, principal=principal, store=self.gateway.store)
@@ -721,6 +833,9 @@ class BlueAgent:
                 "risk_score": defense.risk_score,
                 "threat_categories": list(defense.threat_categories),
                 "recommended_action": defense.recommended_action,
+                "analysis_summary": defense.analysis_summary,
+                "defense_model": defense.model_name,
+                "defense_seed": defense.model_seed,
             },
         )
 
@@ -778,27 +893,53 @@ class AdversarialStrategyEngine:
             )
         )
 
-    def next_scenario(self) -> AttackScenario:
+    def available_scenarios(self) -> tuple[AttackScenario, ...]:
         if len(self._seen) == len(self.scenarios):
             self._seen.clear()
             self._cycle += 1
+        return tuple(
+            scenario
+            for scenario in self.scenarios
+            if scenario.scenario_id not in self._seen
+        )
+
+    def next_scenario(
+        self, selected_scenario_id: str | None = None
+    ) -> AttackScenario:
         pending = [
             (index, scenario)
             for index, scenario in enumerate(self.scenarios)
             if scenario.scenario_id not in self._seen
         ]
-        # A strategy that previously reached ALLOW receives priority, enabling
-        # the next loop cycle to probe that weak boundary before lower-risk cases.
-        index, selected = max(
-            pending,
-            key=lambda item: (
-                self._boosts.get(item[1].strategy_id, 0),
-                -item[0],
-            ),
-        )
-        self._seen.add(selected.scenario_id)
+        if not pending:
+            pending = list(enumerate(self.scenarios))
+            self._seen.clear()
+            self._cycle += 1
+        if selected_scenario_id is not None:
+            selected = next(
+                (
+                    (index, scenario)
+                    for index, scenario in pending
+                    if scenario.scenario_id == selected_scenario_id
+                ),
+                None,
+            )
+            if selected is None:
+                raise ValueError("selected scenario is not currently available")
+            index, selected_scenario = selected
+        else:
+            # Preserve deterministic adaptive selection when no hosted planner
+            # is injected (for unit tests and non-inference tooling).
+            index, selected_scenario = max(
+                pending,
+                key=lambda item: (
+                    self._boosts.get(item[1].strategy_id, 0),
+                    -item[0],
+                ),
+            )
+        self._seen.add(selected_scenario.scenario_id)
         self._cursor = index + 1
-        return selected
+        return selected_scenario
 
     def observe(self, observation: AttackObservation) -> None:
         if not isinstance(observation, AttackObservation):
@@ -829,6 +970,7 @@ class RedBlueSimulation:
         nonce_store: SQLiteStore | None = None,
         red_agent: RedAgent | None = None,
         blue_agent: BlueAgent | None = None,
+        red_strategy_planner: Any | None = None,
     ) -> None:
         self.store = store
         self.gateway = gateway
@@ -838,6 +980,7 @@ class RedBlueSimulation:
         self.nonce_store = nonce_store or store
         self.red_agent = red_agent or RedAgent()
         self.blue_agent = blue_agent or BlueAgent(gateway)
+        self.red_strategy_planner = red_strategy_planner
         red_credential = authenticator.credentials.get(red_key_id)
         blue_credential = authenticator.credentials.get(blue_key_id)
         if red_credential is None or red_credential.agent_id != self.red_agent.agent_id:
@@ -913,6 +1056,7 @@ class RedBlueSimulation:
                 "key_id": signed_response.key_id,
                 "scenario_id": scenario.scenario_id,
                 "authenticated": True,
+                "strategy_summary": observation.strategy_summary,
             },
         )
         verified_response = self.authenticator.verify(
@@ -945,6 +1089,11 @@ class RedBlueSimulation:
                 "actual_decision": observation.decision.value,
                 "expected_reason_code": scenario.expected_reason_code,
                 "passed": observation.passed,
+                "strategy_summary": observation.strategy_summary,
+                "strategy_seed": observation.strategy_seed,
+                "analysis_summary": observation.analysis_summary,
+                "defense_model": observation.defense_model,
+                "defense_seed": observation.defense_seed,
                 "attack_prevented": observation.attack_prevented,
                 "attack_success": observation.attack_success,
                 "risk_score": observation.risk_score,
@@ -982,7 +1131,26 @@ class RedBlueSimulation:
             )
         observations = []
         for round_number in range(1, rounds + 1):
-            scenario = strategy_engine.next_scenario()
+            if self.red_strategy_planner is None:
+                scenario = strategy_engine.next_scenario()
+            else:
+                candidates = strategy_engine.available_scenarios()
+                seed_material = f"{round_number}:" + ":".join(
+                    item.scenario_id for item in candidates
+                )
+                seed = int.from_bytes(
+                    hashlib.sha256(seed_material.encode("utf-8")).digest()[:4],
+                    "big",
+                )
+                plan = self.red_strategy_planner.plan(
+                    candidates,
+                    previous_observations=tuple(observations),
+                    seed=seed,
+                )
+                scenario = strategy_engine.next_scenario(
+                    selected_scenario_id=plan.scenario_id
+                )
+                scenario = self.red_strategy_planner.apply(scenario, plan)
             observation = self.run(
                 scenario,
                 principal=principal,
