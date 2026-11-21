@@ -164,16 +164,18 @@ def _secret_from_manager(secret_arn: str, region: str) -> str:
 
 
 def _resolve_api_key() -> str:
+    # An explicitly provisioned Secrets Manager target is authoritative so
+    # operator-console updates take effect even if a stale local env value exists.
+    secret_arn = _non_empty_env("SHADOW_HUNTER_NIM_API_KEY_SECRET_ARN")
+    if secret_arn:
+        region = _non_empty_env("AWS_REGION") or _non_empty_env("AWS_DEFAULT_REGION")
+        return _secret_from_manager(secret_arn, region)
     direct = _non_empty_env("NVIDIA_API_KEY")
     if direct:
         return direct
-    secret_arn = _non_empty_env("SHADOW_HUNTER_NIM_API_KEY_SECRET_ARN")
-    if not secret_arn:
-        raise NIMConfigurationError(
-            "Set NVIDIA_API_KEY or SHADOW_HUNTER_NIM_API_KEY_SECRET_ARN"
-        )
-    region = _non_empty_env("AWS_REGION") or _non_empty_env("AWS_DEFAULT_REGION")
-    return _secret_from_manager(secret_arn, region)
+    raise NIMConfigurationError(
+        "Set NVIDIA_API_KEY or SHADOW_HUNTER_NIM_API_KEY_SECRET_ARN"
+    )
 
 
 class NIMChatClient:

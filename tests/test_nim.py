@@ -195,6 +195,25 @@ def test_nim_client_requires_api_key_or_secrets_manager_configuration(monkeypatc
         NIMChatClient.from_environment()
 
 
+
+def test_configured_secrets_manager_key_takes_precedence_over_direct_environment_key(monkeypatch):
+    from unittest.mock import patch
+
+    monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-stale-local-key")
+    monkeypatch.setenv(
+        "SHADOW_HUNTER_NIM_API_KEY_SECRET_ARN",
+        "arn:aws:secretsmanager:region:account:secret:nim",
+    )
+    with patch(
+        "shadow_hunter.nim._secret_from_manager",
+        return_value="nvapi-current-managed-key",
+    ) as load_secret:
+        client = NIMChatClient.from_environment()
+
+    load_secret.assert_called_once()
+    assert client._api_key == "nvapi-current-managed-key"
+
+
 def test_nim_client_rejects_bad_structured_output():
     from unittest.mock import patch
 

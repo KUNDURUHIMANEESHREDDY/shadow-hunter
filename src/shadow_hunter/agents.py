@@ -203,17 +203,20 @@ class AgentAuthenticator:
 
     @classmethod
     def from_environment(cls) -> "AgentAuthenticator":
-        raw = os.environ.get("SHADOW_HUNTER_A2A_KEYS", "").strip()
-        if not raw:
-            secret_arn = os.environ.get(
-                "SHADOW_HUNTER_A2A_KEYS_SECRET_ARN", ""
-            ).strip()
-            if secret_arn:
-                region = (
-                    os.environ.get("AWS_REGION", "")
-                    or os.environ.get("AWS_DEFAULT_REGION", "")
-                )
-                raw = _load_a2a_secret(secret_arn, region)
+        # The provisioned Secrets Manager value is authoritative when present,
+        # so operator-console key rotation is used by the next evaluation run.
+        secret_arn = os.environ.get(
+            "SHADOW_HUNTER_A2A_KEYS_SECRET_ARN", ""
+        ).strip()
+        raw = ""
+        if secret_arn:
+            region = (
+                os.environ.get("AWS_REGION", "")
+                or os.environ.get("AWS_DEFAULT_REGION", "")
+            )
+            raw = _load_a2a_secret(secret_arn, region)
+        else:
+            raw = os.environ.get("SHADOW_HUNTER_A2A_KEYS", "").strip()
         if not raw:
             raise A2AConfigurationError(
                 "Set SHADOW_HUNTER_A2A_KEYS or SHADOW_HUNTER_A2A_KEYS_SECRET_ARN"

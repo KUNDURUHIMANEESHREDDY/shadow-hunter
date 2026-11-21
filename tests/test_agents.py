@@ -70,6 +70,31 @@ def system(tmp_path):
     return store, gateway, principal, authenticator, simulation, scenarios
 
 
+
+def test_configured_a2a_secret_store_takes_precedence_over_direct_environment_keys(monkeypatch):
+    from unittest.mock import patch
+    import json
+
+    managed = {
+        "red-managed": {"agent_id": "red-agent", "secret": "r" * 48},
+        "blue-managed": {"agent_id": "blue-agent", "secret": "b" * 48},
+    }
+    monkeypatch.setenv("SHADOW_HUNTER_A2A_KEYS", "not valid JSON")
+    monkeypatch.setenv(
+        "SHADOW_HUNTER_A2A_KEYS_SECRET_ARN",
+        "arn:aws:secretsmanager:region:account:secret:a2a",
+    )
+    with patch(
+        "shadow_hunter.agents._load_a2a_secret",
+        return_value=json.dumps(managed),
+    ) as load_secret:
+        authenticator = AgentAuthenticator.from_environment()
+
+    load_secret.assert_called_once()
+    assert authenticator.key_id_for_agent("red-agent") == "red-managed"
+    assert authenticator.key_id_for_agent("blue-agent") == "blue-managed"
+
+
 def test_authenticated_red_blue_suite_blocks_attacks_and_records_evidence(system):
     store, _, principal, _, simulation, scenarios = system
 

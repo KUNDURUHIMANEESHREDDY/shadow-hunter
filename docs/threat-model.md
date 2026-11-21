@@ -100,6 +100,13 @@ hostname is enabled.
 - Per-agent HMAC secrets must be unique, at least 32 bytes, provisioned outside source
   control, and protected as application secrets. Compromise of a sender's key allows
   message forgery as that sender until rotation.
+- Operator-managed provider and A2A secrets are written only to two fixed Secrets
+  Manager ARNs. The browser cannot choose a secret ARN, read secret values, or receive
+  generated HMAC material. The Lambda role is scoped to GetSecretValue and
+  PutSecretValue on those exact ARNs; it has no Secrets Manager create/delete/list
+  permissions. The operator mutations require a verified operator identity and create
+  redacted audit events. The OAuth console login uses authorization code + PKCE; the
+  access token is kept in page memory rather than browser storage.
 - Message signatures cover the protocol version, message identifiers, trace, sender,
   recipient, message type, payload, key ID, issue time, and nonce.
 - The receiver enforces the configured sender-to-key mapping, a bounded timestamp

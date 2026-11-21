@@ -6,6 +6,7 @@ import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from fastapi import Body, FastAPI, Header, HTTPException, Query
@@ -38,6 +39,7 @@ from .nim import (
 )
 from .policy import PolicyConfig, PolicyEngine, Principal
 from .store import SQLiteStore, StoreError
+from .settings import IntegrationSecretStore, IntegrationSettingsError
 
 
 WEB_ROOT = Path(__file__).parent / "web"
@@ -58,6 +60,7 @@ def create_app(
     store: Any | None = None,
     authenticator: Any | None = None,
     harness_client: AgentCoreHarnessClient | None = None,
+    integration_secrets: IntegrationSecretStore | None = None,
 ) -> FastAPI:
     if store is None:
         backend = os.environ.get("SHADOW_HUNTER_STORE_BACKEND", "sqlite").strip().lower()
@@ -104,6 +107,7 @@ def create_app(
     app.state.gateway = gateway
     app.state.harness_client = harness_client
     app.state.mcp_server = mcp_server
+    app.state.integration_secrets = integration_secrets or IntegrationSecretStore.from_environment()
     app.state.demo_mode = os.environ.get("SHADOW_HUNTER_DEMO_MODE", "").lower() == "true"
 
     def customer(authorization: str | None):
@@ -133,9 +137,150 @@ def create_app(
             "demo_mode": app.state.demo_mode,
         }
 
+    @app.get("/operator/config")
+    def operator_console_config() -> dict[str, Any]:
+        # Cognito's hosted UI domain and app-client ID are public OAuth client
+        # configuration, not credentials. Never return provider or HMAC secrets.
+        hosted_domain = os.environ.get(
+            "SHADOW_HUNTER_COGNITO_HOSTED_UI_DOMAIN", ""
+        ).strip().rstrip("/")
+        parsed_domain = urlsplit(hosted_domain) if hosted_domain else None
+        valid_domain = bool(
+            parsed_domain
+            and parsed_domain.scheme == "https"
+            and parsed_domain.hostname
+            and not parsed_domain.username
+            and not parsed_domain.password
+            and not parsed_domain.query
+            and not parsed_domain.fragment
+            and parsed_domain.path in ("", "/")
+        )
+        mode = os.environ.get("SHADOW_HUNTER_AUTH_MODE", "local").strip().lower()
+        return {
+            "auth_mode": mode,
+            "cognito": {
+                "hosted_ui_domain": hosted_domain if valid_domain else "",
+                "operator_client_id": os.environ.get(
+                    "SHADOW_HUNTER_COGNITO_OPERATOR_CLIENT_ID", ""
+                ).strip(),
+                "login_available": bool(
+                    mode == "cognito"
+                    and valid_domain
+                    and os.environ.get(
+                        "SHADOW_HUNTER_COGNITO_OPERATOR_CLIENT_ID", ""
+                    ).strip()
+                ),
+            },
+        }
+
     @app.get("/operator")
     def operator_console() -> FileResponse:
         return FileResponse(WEB_ROOT / "operator.html")
+
+    @app.get("/v1/operator/settings/integrations")
+    def integration_settings_status(
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        operator(authorization)
+        try:
+            return app.state.integration_secrets.status()
+        except IntegrationSettingsError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.put("/v1/operator/settings/nvidia-nim")
+    def save_nvidia_nim_settings(
+        body: dict[str, Any] = Body(...),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        operator_id = operator(authorization)
+        if set(body) != {"api_key"}:
+            raise HTTPException(status_code=422, detail="Only api_key is accepted")
+        try:
+            app.state.integration_secrets.save_nim_api_key(body.get("api_key"))
+        except IntegrationSettingsError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        event_id = str(uuid4())
+        try:
+            store.append_audit(
+                event_type="OPERATOR_INTEGRATION_SECRET_UPDATED",
+                trace_id=event_id,
+                request_id=event_id,
+                actor_id=operator_id,
+                tenant_id="operator",
+                resource_id="nvidia_nim",
+                details={"integration": "nvidia_nim", "operation": "secret_updated"},
+            )
+        except StoreError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Secret was updated, but its audit record could not be persisted. Verify status before retrying.",
+            ) from exc
+        return {"saved": True, "secret_returned": False}
+
+    @app.post("/v1/operator/settings/nvidia-nim/test")
+    def test_nvidia_nim_connection(
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        operator(authorization)
+        try:
+            client = NIMChatClient.from_environment(timeout_cap_seconds=5)
+            probe = client.complete_json(
+                model=NIMRedStrategyPlanner.from_environment(client).model,
+                system_prompt="Return the required JSON object and nothing else.",
+                user_prompt="Reply with the value true for the ok field.",
+                seed=0,
+                max_tokens=64,
+                response_schema={
+                    "type": "object",
+                    "properties": {"ok": {"type": "boolean"}},
+                    "required": ["ok"],
+                    "additionalProperties": False,
+                },
+            )
+            if probe.get("ok") is not True:
+                raise NIMInferenceError("NVIDIA NIM connection test returned an invalid result")
+        except (NIMConfigurationError, NIMInferenceError) as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return {"connected": True, "provider": "nvidia_nim"}
+
+    @app.post("/v1/operator/settings/red-blue/rotate")
+    def rotate_red_blue_keys(
+        body: dict[str, Any] = Body(default={}),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        operator_id = operator(authorization)
+        if body:
+            raise HTTPException(status_code=422, detail="This operation accepts no fields")
+        try:
+            key_ids = app.state.integration_secrets.rotate_a2a_keys()
+        except IntegrationSettingsError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        event_id = str(uuid4())
+        try:
+            store.append_audit(
+                event_type="OPERATOR_INTEGRATION_SECRET_UPDATED",
+                trace_id=event_id,
+                request_id=event_id,
+                actor_id=operator_id,
+                tenant_id="operator",
+                resource_id="red_blue_signing",
+                details={
+                    "integration": "red_blue_signing",
+                    "operation": "keys_rotated",
+                    **key_ids,
+                },
+            )
+        except StoreError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Signing keys were rotated, but their audit record could not be persisted. Verify status before retrying.",
+            ) from exc
+        return {
+            "rotated": True,
+            "red_key_id": key_ids["red_key_id"],
+            "blue_key_id": key_ids["blue_key_id"],
+            "secrets_returned": False,
+        }
 
     @app.post("/v1/agent/chat")
     def agent_chat(

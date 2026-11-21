@@ -11,9 +11,10 @@
     h1{font-size:25px;margin:0;font-weight:650;letter-spacing:-.5px}p{color:#667085;margin:7px 0 0}
     .auth{display:flex;gap:8px;align-items:center}.auth input{width:270px}
     input,button{font:inherit;border:1px solid #d7dce5;border-radius:10px;padding:10px 12px;background:#fff}
-    button{cursor:pointer;background:#172033;color:white;border-color:#172033}button.secondary{background:#fff;color:#172033}
-    button:disabled{opacity:.45;cursor:not-allowed}.grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-bottom:22px}
-    .metric,.panel{background:white;border:1px solid #e5e9f0;border-radius:15px;padding:17px}
+    input{min-width:0}button{cursor:pointer;background:#172033;color:white;border-color:#172033}
+    button.secondary{background:#fff;color:#172033}button:disabled{opacity:.45;cursor:not-allowed}
+    .grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-bottom:22px}
+    .metric,.panel,.setting-card{background:white;border:1px solid #e5e9f0;border-radius:15px;padding:17px}
     .metric span{display:block;font-size:12px;color:#667085}.metric strong{display:block;font-size:27px;margin-top:7px;font-weight:650}
     .panel{margin-top:16px}.panel h2{font-size:16px;margin:0 0 14px}
     .table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;font-size:13px}
@@ -22,8 +23,13 @@
     .pill{display:inline-block;border-radius:100px;padding:4px 8px;font-size:11px;font-weight:650;background:#eef1f6}
     .ALLOW,.APPROVED,.EXECUTED{background:#e7f5ed;color:#17663a}.DENY,.REJECTED,.EXPIRED{background:#fdecec;color:#9b2727}
     .ESCALATE,.PENDING{background:#fff3db;color:#8a5a05}.actions{display:flex;gap:6px}
-    .muted{color:#667085}.banner{margin:12px 0;color:#667085;font-size:13px}
-    @media(max-width:850px){.grid{grid-template-columns:repeat(2,1fr)}header{align-items:flex-start;flex-direction:column}.auth{width:100%}.auth input{flex:1;width:auto}}
+    .muted{color:#667085}.banner{margin:12px 0;color:#667085;font-size:13px;min-height:20px}
+    .settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+    .setting-card h3{font-size:15px;margin:0 0 6px}.setting-card p{font-size:13px;line-height:1.5;margin:0 0 12px}
+    .setting-status{font-size:12px;font-weight:650;margin:0 0 12px;color:#667085}
+    .setting-form{display:flex;gap:8px;flex-wrap:wrap}.setting-form input{flex:1 1 230px}
+    .security-note{font-size:12px;color:#667085;line-height:1.5;margin-top:14px}
+    @media(max-width:850px){.grid{grid-template-columns:repeat(2,1fr)}header{align-items:flex-start;flex-direction:column}.auth{width:100%}.auth input{flex:1;width:auto}.settings-grid{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
@@ -31,11 +37,16 @@
   <header>
     <div><h1>Shadow Hunter</h1><p>Agent governance · approvals · audit evidence</p></div>
     <div class="auth">
-      <input id="operator-token" type="password" autocomplete="off" placeholder="Operator bearer token">
-      <button id="connect">Connect</button>
+      <div id="local-auth">
+        <label for="operator-token" class="muted" style="position:absolute;left:-10000px">Operator bearer token</label>
+        <input id="operator-token" type="password" autocomplete="off" placeholder="Local operator bearer token">
+        <button id="connect">Connect</button>
+      </div>
+      <button id="cognito-login" hidden>Sign in with Cognito</button>
+      <button id="logout" class="secondary" hidden>Sign out</button>
     </div>
   </header>
-  <div id="message" class="banner">Enter an operator token to load protected data.</div>
+  <div id="message" class="banner">Loading operator configuration…</div>
   <section class="grid" id="metrics">
     <div class="metric"><span>Refund requests</span><strong>—</strong></div>
     <div class="metric"><span>Pending approvals</span><strong>—</strong></div>
@@ -43,6 +54,33 @@
     <div class="metric"><span>Executed refunds</span><strong>—</strong></div>
     <div class="metric"><span>Audit events</span><strong>—</strong></div>
   </section>
+
+  <section class="panel" id="integration-settings">
+    <h2>Settings · Integrations &amp; Secrets</h2>
+    <div class="settings-grid">
+      <div class="setting-card">
+        <h3>NVIDIA NIM</h3>
+        <p>Store the hosted inference API key in the configured AWS Secrets Manager secret. The key is sent only to the backend.</p>
+        <div class="setting-status" id="nim-status" aria-live="polite">Status unavailable until connected.</div>
+        <form id="nim-form" class="setting-form">
+          <label for="nim-api-key" class="muted" style="position:absolute;left:-10000px">NVIDIA API key</label>
+          <input id="nim-api-key" type="password" autocomplete="new-password" placeholder="Paste NVIDIA API key" maxlength="4096">
+          <button type="submit" id="save-nim">Save key</button>
+          <button type="button" class="secondary" id="test-nim">Test connection</button>
+        </form>
+      </div>
+      <div class="setting-card">
+        <h3>Red / Blue agent signing</h3>
+        <p>Generate two independent HMAC keys, one for Red and one for Blue. Rotation replaces both stored keys; existing signed messages will no longer validate.</p>
+        <div class="setting-status" id="a2a-status" aria-live="polite">Status unavailable until connected.</div>
+        <div class="setting-form">
+          <button type="button" id="rotate-a2a">Generate / rotate signing keys</button>
+        </div>
+      </div>
+    </div>
+    <p class="security-note">Secret values are never returned by the API, written to browser storage, included in audit records, or displayed after saving. Secret storage targets must be provisioned in AWS before they can be managed here.</p>
+  </section>
+
   <section class="panel">
     <h2>Approval queue</h2>
     <div class="table-wrap"><table><thead><tr><th>Request</th><th>Order</th><th>Amount</th><th>Policy</th><th>Status</th><th>Action</th></tr></thead><tbody id="approvals"><tr><td colspan="6" class="muted">Connect to load approvals.</td></tr></tbody></table></div>
@@ -79,16 +117,47 @@
 <script>
 (() => {
   let operatorToken = "";
+  let authConfig = null;
   const approvalTokens = new Map();
   const $ = (id) => document.getElementById(id);
+  const API_BASE = window.location.pathname.replace(/\/operator\/?$/, "");
+  const apiUrl = (path) => API_BASE + path;
   const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
   const headers = () => ({ "Authorization": "Bearer " + operatorToken, "Content-Type": "application/json" });
   const setMessage = (text, isError=false) => { $("message").textContent = text; $("message").style.color = isError ? "#9b2727" : "#667085"; };
+  const randomBase64Url = (length=32) => {
+    const bytes = new Uint8Array(length);
+    crypto.getRandomValues(bytes);
+    return btoa(String.fromCharCode(...bytes)).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+  };
+  const base64Url = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
   async function api(path, options={}) {
-    const response = await fetch(path, {...options, headers: {...headers(), ...(options.headers || {})}});
+    const response = await fetch(apiUrl(path), {...options, headers: {...headers(), ...(options.headers || {})}});
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.detail || ("Request failed: " + response.status));
+    if (!response.ok) {
+      if (response.status === 401 && authConfig?.auth_mode === "cognito") {
+        operatorToken = "";
+        approvalTokens.clear();
+        $("logout").hidden = true;
+        $("cognito-login").hidden = !authConfig.cognito.login_available;
+      }
+      throw new Error(payload.detail || ("Request failed: " + response.status));
+    }
     return payload;
+  }
+  async function loadIntegrationSettings() {
+    const status = await api("/v1/operator/settings/integrations");
+    const nim = status.nvidia_nim || {};
+    const a2a = status.red_blue_signing || {};
+    $("nim-status").textContent = !nim.storage_available
+      ? "Secret storage target unavailable or not readable. Check the ARN and IAM access."
+      : (nim.configured ? "API key configured in Secrets Manager." : "API key not configured.");
+    $("a2a-status").textContent = !a2a.storage_available
+      ? "Secret storage target unavailable or not readable. Check the ARN and IAM access."
+      : (a2a.configured ? "Distinct Red and Blue keys are configured." : "Signing keys not configured.");
+    $("save-nim").disabled = !nim.storage_available;
+    $("rotate-a2a").disabled = !a2a.storage_available;
+    $("test-nim").disabled = !nim.configured;
   }
   async function load() {
     if (!operatorToken) return;
@@ -104,7 +173,10 @@
       renderApprovals(approvals);
       renderAudit(audit);
       renderAgentEvaluation(agentEvaluation);
-      setMessage("Connected. Approval tokens remain in this page's memory and are never written to browser storage.");
+      await loadIntegrationSettings();
+      setMessage("Connected. Integration secrets remain server-side; approval tokens remain in this tab's memory.");
+      $("logout").hidden = authConfig?.auth_mode !== "cognito";
+      $("cognito-login").hidden = authConfig?.auth_mode === "cognito";
     } catch (error) { setMessage(error.message, true); }
   }
   function renderApprovals(rows) {
@@ -165,14 +237,127 @@
     $("trace-id").textContent = traceId;
     $("trace-events").innerHTML = events.map(row => '<tr><td>' + escapeHtml((row.created_at || "").replace("T"," ").slice(0,19)) + '</td><td>' + escapeHtml(row.event_type) + '</td><td>' + escapeHtml(row.decision || "—") + '</td><td>' + escapeHtml(row.reason_code || "—") + '</td><td>' + escapeHtml(row.resource_id || "—") + '</td><td>' + escapeHtml(JSON.stringify(row.details || {})) + '</td></tr>').join("") || '<tr><td colspan="6" class="muted">No events for this trace.</td></tr>';
   }
+  async function startCognitoLogin() {
+    if (!authConfig?.cognito?.login_available) return;
+    const verifier = randomBase64Url(48);
+    const state = randomBase64Url(32);
+    sessionStorage.setItem("shadow_hunter_oauth_state", state);
+    sessionStorage.setItem("shadow_hunter_pkce_verifier", verifier);
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+    const challenge = base64Url(digest);
+    const redirectUri = window.location.origin + window.location.pathname;
+    const query = new URLSearchParams({
+      client_id: authConfig.cognito.operator_client_id,
+      response_type: "code",
+      scope: "openid",
+      redirect_uri: redirectUri,
+      state,
+      code_challenge: challenge,
+      code_challenge_method: "S256"
+    });
+    window.location.assign(authConfig.cognito.hosted_ui_domain + "/oauth2/authorize?" + query.toString());
+  }
+  async function completeCognitoLogin() {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("code");
+    if (!code) return false;
+    const state = params.get("state") || "";
+    const expectedState = sessionStorage.getItem("shadow_hunter_oauth_state") || "";
+    const verifier = sessionStorage.getItem("shadow_hunter_pkce_verifier") || "";
+    sessionStorage.removeItem("shadow_hunter_oauth_state");
+    sessionStorage.removeItem("shadow_hunter_pkce_verifier");
+    history.replaceState({}, document.title, window.location.pathname);
+    if (!state || !expectedState || state !== expectedState || !verifier) {
+      setMessage("Cognito sign-in could not be verified. Start sign-in again.", true);
+      return false;
+    }
+    const redirectUri = window.location.origin + window.location.pathname;
+    const body = new URLSearchParams({
+      grant_type: "authorization_code",
+      client_id: authConfig.cognito.operator_client_id,
+      code,
+      redirect_uri: redirectUri,
+      code_verifier: verifier
+    });
+    const response = await fetch(authConfig.cognito.hosted_ui_domain + "/oauth2/token", {
+      method: "POST",
+      headers: {"Content-Type":"application/x-www-form-urlencoded"},
+      body
+    });
+    if (!response.ok) {
+      setMessage("Cognito token exchange failed. Check the app-client callback and OAuth settings.", true);
+      return false;
+    }
+    const tokens = await response.json();
+    if (typeof tokens.access_token !== "string" || !tokens.access_token) {
+      setMessage("Cognito did not return an access token.", true);
+      return false;
+    }
+    operatorToken = tokens.access_token;
+    await load();
+    return true;
+  }
   $("connect").addEventListener("click", async () => {
     operatorToken = $("operator-token").value.trim();
+    $("operator-token").value = "";
     approvalTokens.clear();
     await load();
   });
+  $("cognito-login").addEventListener("click", startCognitoLogin);
+  $("logout").addEventListener("click", () => {
+    operatorToken = "";
+    approvalTokens.clear();
+    $("logout").hidden = true;
+    $("cognito-login").hidden = !authConfig?.cognito?.login_available;
+    $("approvals").innerHTML = '<tr><td colspan="6" class="muted">Sign in to load approvals.</td></tr>';
+    if (authConfig?.cognito?.login_available) {
+      const query = new URLSearchParams({
+        client_id: authConfig.cognito.operator_client_id,
+        logout_uri: window.location.origin + window.location.pathname
+      });
+      window.location.assign(authConfig.cognito.hosted_ui_domain + "/logout?" + query.toString());
+      return;
+    }
+    setMessage("Signed out. Access tokens are held only in page memory.");
+  });
+  $("nim-form").addEventListener("submit", async event => {
+    event.preventDefault();
+    const input = $("nim-api-key");
+    const apiKey = input.value;
+    if (!apiKey) { setMessage("Enter an NVIDIA API key before saving.", true); return; }
+    $("save-nim").disabled = true;
+    try {
+      await api("/v1/operator/settings/nvidia-nim", {
+        method:"PUT",
+        body:JSON.stringify({api_key:apiKey})
+      });
+      input.value = "";
+      await loadIntegrationSettings();
+      setMessage("NVIDIA API key saved to Secrets Manager. The value was not returned.");
+    } catch (error) { setMessage(error.message, true); }
+    finally { $("save-nim").disabled = false; }
+  });
+  $("test-nim").addEventListener("click", async () => {
+    $("test-nim").disabled = true;
+    try {
+      const result = await api("/v1/operator/settings/nvidia-nim/test", {method:"POST",body:"{}"});
+      setMessage(result.connected ? "NVIDIA NIM connection verified." : "NVIDIA NIM connection failed.", !result.connected);
+    } catch (error) { setMessage(error.message, true); }
+    finally { await loadIntegrationSettings(); }
+  });
+  $("rotate-a2a").addEventListener("click", async () => {
+    if (!window.confirm("Rotate both Red and Blue signing keys? Any messages signed with the previous keys will no longer validate.")) return;
+    $("rotate-a2a").disabled = true;
+    try {
+      const result = await api("/v1/operator/settings/red-blue/rotate", {method:"POST",body:"{}"});
+      await loadIntegrationSettings();
+      setMessage("Red and Blue signing keys rotated and stored. Key IDs: " + result.red_key_id + ", " + result.blue_key_id + ". Secret values were never returned.");
+    } catch (error) { setMessage(error.message, true); }
+    finally { $("rotate-a2a").disabled = false; }
+  });
   $("run-agent-evaluation").addEventListener("click", async () => {
     const button = $("run-agent-evaluation");
-    if (!operatorToken) { setMessage("Connect with an operator token first.", true); return; }
+    if (!operatorToken) { setMessage("Sign in before running the evaluation.", true); return; }
     button.disabled = true;
     button.textContent = "Running…";
     try {
@@ -220,6 +405,30 @@
     try { await showTrace(traceId); }
     catch (error) { setMessage(error.message, true); }
   });
+  async function initialize() {
+    try {
+      const response = await fetch(apiUrl("/operator/config"));
+      if (!response.ok) throw new Error("Could not load operator configuration.");
+      authConfig = await response.json();
+      if (authConfig.auth_mode === "cognito") {
+        $("local-auth").hidden = true;
+        $("cognito-login").hidden = !authConfig.cognito?.login_available;
+        if (!authConfig.cognito?.login_available) {
+          setMessage("Cognito operator login is not configured. Set the hosted UI domain and operator app-client ID.", true);
+          return;
+        }
+        if (!(await completeCognitoLogin())) {
+          setMessage("Sign in with your Cognito operator account to continue.");
+        }
+      } else {
+        $("local-auth").hidden = false;
+        setMessage("Local authentication mode. Enter a configured operator bearer token.");
+      }
+    } catch (error) {
+      setMessage(error.message, true);
+    }
+  }
+  initialize();
 })();
 </script>
 </body>

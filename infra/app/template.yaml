@@ -22,6 +22,10 @@ Parameters:
   CognitoOperatorClientId:
     Type: String
     Description: Separate Cognito app-client ID for operator access.
+  CognitoHostedUiDomain:
+    Type: String
+    Default: ''
+    Description: HTTPS Cognito hosted UI domain used for operator authorization-code login.
   CognitoToolAudience:
     Type: String
     Description: Resource-server audience in the delegated OBO access token.
@@ -62,8 +66,29 @@ Parameters:
 Conditions:
   HasNvidiaApiKeySecret: !Not [!Equals [!Ref NvidiaApiKeySecretArn, '']]
   HasA2AKeysSecret: !Not [!Equals [!Ref A2AKeysSecretArn, '']]
+  CreateNvidiaApiKeySecret: !Equals [!Ref NvidiaApiKeySecretArn, '']
+  CreateA2AKeysSecret: !Equals [!Ref A2AKeysSecretArn, '']
 
 Resources:
+  NvidiaApiKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: CreateNvidiaApiKeySecret
+    DeletionPolicy: Retain
+    Properties:
+      Name: !Sub 'shadow-hunter/${Environment}/nvidia-api-key'
+      Description: Shadow Hunter NVIDIA NIM provider API key. Managed through the operator console.
+      SecretString: '{}'
+
+  A2AKeysSecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: CreateA2AKeysSecret
+    DeletionPolicy: Retain
+    Properties:
+      Name: !Sub 'shadow-hunter/${Environment}/a2a-agent-keys'
+      Description: Distinct Shadow Hunter Red and Blue agent HMAC signing keys. Managed through the operator console.
+      SecretString: '{}'
+
+
   ShadowHunterLambdaLogs:
     Type: AWS::Logs::LogGroup
     DeletionPolicy: Retain
@@ -136,12 +161,19 @@ Resources:
           SHADOW_HUNTER_COGNITO_TOOL_SCOPE: !Ref CognitoToolScope
           SHADOW_HUNTER_COGNITO_ACTOR_SUB: !Ref CognitoActorSubject
           SHADOW_HUNTER_COGNITO_OPERATOR_CLIENT_ID: !Ref CognitoOperatorClientId
+          SHADOW_HUNTER_COGNITO_HOSTED_UI_DOMAIN: !Ref CognitoHostedUiDomain
           SHADOW_HUNTER_COGNITO_OPERATOR_GROUP: !Ref CognitoOperatorGroup
           SHADOW_HUNTER_REFUND_LIMIT_MINOR: !Sub '${RefundLimitMinor}'
           SHADOW_HUNTER_APPROVAL_TTL_SECONDS: !Sub '${ApprovalTtlSeconds}'
           SHADOW_HUNTER_HARNESS_ARN: !Ref HarnessArn
-          SHADOW_HUNTER_NIM_API_KEY_SECRET_ARN: !Ref NvidiaApiKeySecretArn
-          SHADOW_HUNTER_A2A_KEYS_SECRET_ARN: !Ref A2AKeysSecretArn
+          SHADOW_HUNTER_NIM_API_KEY_SECRET_ARN: !If
+            - HasNvidiaApiKeySecret
+            - !Ref NvidiaApiKeySecretArn
+            - !Ref NvidiaApiKeySecret
+          SHADOW_HUNTER_A2A_KEYS_SECRET_ARN: !If
+            - HasA2AKeysSecret
+            - !Ref A2AKeysSecretArn
+            - !Ref A2AKeysSecret
           SHADOW_HUNTER_NIM_RED_MODEL: nvidia/nemotron-3.5-lightning-30b-a3b
           SHADOW_HUNTER_NIM_BLUE_MODEL: nvidia/nemotron-3.5-bolt-e4b
           SHADOW_HUNTER_NIM_TIMEOUT_SECONDS: '8'
@@ -162,26 +194,28 @@ Resources:
               Resource:
                 - !Ref DynamoDBTableArn
                 - !Sub '${DynamoDBTableArn}/index/GSI1'
-        - !If
-          - HasNvidiaApiKeySecret
-          - Version: '2012-10-17'
-            Statement:
-              - Sid: ReadNvidiaNimApiKey
-                Effect: Allow
-                Action:
-                  - secretsmanager:GetSecretValue
-                Resource: !Ref NvidiaApiKeySecretArn
-          - !Ref AWS::NoValue
-        - !If
-          - HasA2AKeysSecret
-          - Version: '2012-10-17'
-            Statement:
-              - Sid: ReadA2AAgentKeys
-                Effect: Allow
-                Action:
-                  - secretsmanager:GetSecretValue
-                Resource: !Ref A2AKeysSecretArn
-          - !Ref AWS::NoValue
+        - Version: '2012-10-17'
+          Statement:
+            - Sid: ManageNvidiaNimApiKey
+              Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+                - secretsmanager:PutSecretValue
+              Resource: !If
+                - HasNvidiaApiKeySecret
+                - !Ref NvidiaApiKeySecretArn
+                - !Ref NvidiaApiKeySecret
+        - Version: '2012-10-17'
+          Statement:
+            - Sid: ManageA2AAgentKeys
+              Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+                - secretsmanager:PutSecretValue
+              Resource: !If
+                - HasA2AKeysSecret
+                - !Ref A2AKeysSecretArn
+                - !Ref A2AKeysSecret
       Events:
         Health:
           Type: HttpApi
@@ -194,6 +228,12 @@ Resources:
           Properties:
             ApiId: !Ref ShadowHunterHttpApi
             Path: /operator
+            Method: GET
+        OperatorConsoleConfig:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ShadowHunterHttpApi
+            Path: /operator/config
             Method: GET
         CustomerChat:
           Type: HttpApi
