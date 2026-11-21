@@ -40,7 +40,7 @@ No tests, builds, linters, SAM validators, browser checks, fuzzing, live endpoin
 - **Severity:** MEDIUM
 - **Confidence:** HIGH
 - **Status:** Open
-- **Affected paths:** [gateway.py](../src/shadow_hunter/gateway.py#L100), [policy.py](../src/shadow_hunter/policy.py#L197), [policy.py](../src/shadow_hunter/policy.py#L225), [policy.py](../src/shadow_hunter/policy.py#L229), [api.py](../src/shadow_hunter/api.py#L345)
+- **Affected paths:** [gateway.py](../src/shadow_hunter/gateway.py#L100), [policy.py](../src/shadow_hunter/policy.py#L197), [policy.py](../src/shadow_hunter/policy.py#L225), [policy.py](../src/shadow_hunter/policy.py#L229), [api.py](../src/shadow_hunter/api.py#L319)
 
 **Evidence**
 
