@@ -218,7 +218,31 @@ synthetic scenarios, not universal model attack-detection accuracy.
 
 ## Verification and deployment status
 
-The hosted adapter, API wiring, operator display and behavior-focused tests
-have been authored but not executed under the current repository engineering
-cycle. No NVIDIA API call, AWS resource creation, secret provisioning, or
-deployment has been performed in this cycle.
+Verification performed locally on 20 November 2026:
+
+- Focused command:
+  `python -m pytest tests/test_nim.py tests/test_agents.py tests/test_gateway.py tests/test_agent_evaluation_store.py -q`
+  — **37 passed**.
+- Full command: `python -m pytest -q` — **112 passed, 2 failed**. The failures
+  are outside the Red/Blue change: the AgentCore session-ID test expects an
+  error-message phrase the current implementation does not emit, and the
+  Lambda entrypoint test cannot import the optional `mangum` dependency,
+  which is not installed in this local environment.
+- `python -m compileall -q src/shadow_hunter tests` — passed.
+- `git diff --check` — passed.
+- A one-round Red/Blue-to-gateway adapter integration test passed in the
+  focused suite using stubbed NIM clients.
+- A three-round local synthetic contract run also used stubbed NIM responses:
+  two attacks were denied, one legitimate own-order read was allowed, no
+  refunds were executed, and all three expected decisions matched. Metrics:
+  attack success 0/2, defensive effectiveness 2/2, false-denial rate 0/1,
+  and policy decision accuracy 3/3. This proves the local harness path only;
+  it is not evidence of hosted model quality or provider latency.
+
+A live NVIDIA evaluation was not possible. Presence-only checks found no
+NVIDIA API key/secret ARN, A2A signing-key configuration, or operator token
+in the connected process environment, and no local API server was listening
+on port 8000. No `.env` or credential file was opened, no secret values were
+read or requested, and no NVIDIA request or AWS operation was made. The next
+verification step remains a credentialed one-round hosted call followed by
+the three-round hosted evaluation.

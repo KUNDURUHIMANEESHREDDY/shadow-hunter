@@ -1056,7 +1056,7 @@ class RedBlueSimulation:
                 "key_id": signed_response.key_id,
                 "scenario_id": scenario.scenario_id,
                 "authenticated": True,
-                "strategy_summary": observation.strategy_summary,
+                "strategy_summary": scenario.model_strategy_summary,
             },
         )
         verified_response = self.authenticator.verify(
