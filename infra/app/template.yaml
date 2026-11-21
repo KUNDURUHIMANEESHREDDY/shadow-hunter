@@ -144,7 +144,7 @@ Resources:
           SHADOW_HUNTER_A2A_KEYS_SECRET_ARN: !Ref A2AKeysSecretArn
           SHADOW_HUNTER_NIM_RED_MODEL: nvidia/nemotron-3.5-lightning-30b-a3b
           SHADOW_HUNTER_NIM_BLUE_MODEL: nvidia/nemotron-3.5-bolt-e4b
-          SHADOW_HUNTER_NIM_TIMEOUT_SECONDS: '3'
+          SHADOW_HUNTER_NIM_TIMEOUT_SECONDS: '8'
           SHADOW_HUNTER_NIM_MAX_TOKENS: '512'
           SHADOW_HUNTER_DEMO_MODE: 'false'
       Policies:
