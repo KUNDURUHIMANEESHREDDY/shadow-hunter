@@ -204,11 +204,11 @@ These source observations are positive design controls, not proof that the deplo
 | Full Python regression/integration suite on merged main | **177 passed** (isolated Python 3.11 environment with dev/server/aws extras) |
 | Focused approval/API/DynamoDB/gateway security tests | **37 passed**; includes maker-checker, token recovery/rotation, evaluation quota and public resource-denial behavior |
 | Browser security | Microsoft Edge headless check passed for operator page response headers and iframe blocking; full recovery UI E2E and deployed edge behavior remain pending |
-| Semgrep source/security/secrets | Previously 0 findings across 22 files / 122 rules on the pre-rebase remediation tree; treat as prior-snapshot evidence, not a new scan of every merged file |
-| pip-audit | Previously no known vulnerabilities in src/requirements.txt; re-run if dependencies change |
-| Bandit | Previously 0 High / 0 Medium / 10 Low; retained as qualified prior evidence, not a certification |
-| Ruff | Earlier default ruleset reported repository-wide existing findings; no blanket autofix was applied |
-| Python compilation / repository metadata / diff | Must be recorded against the final merged state before push |
+| Semgrep source/security/secrets | **0 findings**; 122 rules across 22 tracked source files on the merged tree |
+| pip-audit | **No known vulnerabilities found** in src/requirements.txt |
+| Bandit | **0 High / 0 Medium / 10 Low** on merged source; low findings are listed in the cycle record, and no production secret was reported |
+| Ruff | **88 repository-wide findings** under the installed default ruleset; no blanket autofix was applied. Duplicate new DynamoDB test definitions were removed. |
+| Python compilation / repository metadata / diff | **Passed**: scripts/validate-repo.py, compileall for src/shadow_hunter and tests, and git diff --check |
 | cfn-lint | **Passed all four production templates** on the merged tree |
 | SAM validation | sam validate --lint passed the existing-pool Cognito trigger, data and API templates; new identity stack passed basic SAM validation because bundled SAM schema lags the Cognito delegation property |
 | SAM build | Existing committed WSL2 cycle record reports sam build --no-use-container passed all four templates. A separate Windows-host API build attempt selected pywin32 for a Linux Lambda target and failed for host-platform reasons. |

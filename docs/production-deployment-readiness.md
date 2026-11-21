@@ -236,7 +236,7 @@ Subsequent non-deploying infrastructure validation and local regression evidence
 - Merged-main Python suite: **177 passed**; focused approval/API/DynamoDB/gateway group: **37 passed**.
 - Browser: Edge headless response-header and iframe-blocking check passed; complete reload/recovery/execution UI E2E remains pending.
 - Infrastructure: cfn-lint passed all four templates; sam validate --lint passed existing-pool Cognito trigger, data and API; basic SAM validation passed the new identity stack. The prior WSL2 cycle record reports sam build --no-use-container passed all four templates.
-- Semgrep/pip-audit/Bandit evidence is described in the security report with its snapshot scope; no DAST or penetration test was performed.
+- Merged-main Semgrep: 0 findings across 22 tracked files / 122 rules; pip-audit: no known vulnerabilities; Bandit: 0 High / 0 Medium / 10 Low. DAST and penetration testing were not performed.
 - Cognito/DynamoDB/S3/Lambda/API Gateway/AgentCore resources: not deployed or inspected.
 - Deployment decision: **NO-GO**.
 

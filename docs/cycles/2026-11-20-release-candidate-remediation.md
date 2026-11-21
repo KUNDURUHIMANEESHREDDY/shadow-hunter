@@ -24,14 +24,15 @@
 - Python environment: isolated project .venv using Python 3.11 and the project's dev/server/aws extras.
 - Full Python suite: **177 passed**.
 - Focused approval/API/DynamoDB/gateway security group: **37 passed**.
-- Python compile, repository metadata validation and final git diff checks are being re-run after the last documentation/rebase changes.
+- Python compileall, scripts/validate-repo.py and git diff --check: **passed** after the final rebase and test cleanup.
+- Ruff default ruleset: **88 findings** repo-wide; duplicate newly added DynamoDB test definitions were removed, but broad existing lint findings remain and no autofix was applied.
 - Microsoft Edge headless browser check: operator page loaded with required headers; iframe framing attempt was blocked by frame-ancestors none. Full token-recovery reload/recovery/execution E2E remains pending.
 - cfn-lint: **all four production templates passed** on the merged tree.
 - SAM validation: sam validate --lint passed the existing-pool Cognito trigger, data and API templates; the new identity stack passed SAM basic validation because the bundled SAM schema lags the Cognito delegation property.
 - Prior committed WSL2 verification cycle records sam build --no-use-container success for all four templates. A separate Windows-host API build attempt selected a Windows-only pywin32 wheel for a Linux Lambda target and failed due to the host platform; the earlier Linux build evidence is retained.
-- Semgrep: the prior targeted source/security/secrets scan found 0 findings across 22 files / 122 rules; that scan predates the remote identity additions and is recorded as a prior snapshot.
-- pip-audit: the prior scan of src/requirements.txt reported no known vulnerabilities; dependency manifests were not changed in this remediation.
-- Bandit: prior scan reported 0 High / 0 Medium / 10 Low. Ruff's installed default ruleset reported repository-wide findings; no blanket autofix was applied.
+- Semgrep source/security/secrets on merged main: **0 findings**, 122 rules across 22 tracked source files.
+- pip-audit on merged main requirements: **no known vulnerabilities found** in src/requirements.txt.
+- Bandit on merged source: **0 High / 0 Medium / 10 Low**; the low items are synthetic token/string heuristics and existing broad exception/pass handling. No blanket autofix was applied.
 - DAST, fuzzing, live endpoint tests, live AWS verification, deployment, package uploads, and hosted inference calls were not performed.
 
 ## Remaining release gates
