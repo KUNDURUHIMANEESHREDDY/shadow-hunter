@@ -31,14 +31,24 @@ For local server development, set:
   `nvidia/nemotron-3.5-lightning-30b-a3b`.
 - `SHADOW_HUNTER_NIM_BLUE_MODEL`: optional Blue model override; defaults to
   `nvidia/nemotron-3.5-bolt-e4b`.
-- `SHADOW_HUNTER_NIM_TIMEOUT_SECONDS`: request timeout, default 3 seconds
-  (accepted range 1–3).
+- `SHADOW_HUNTER_NIM_TIMEOUT_SECONDS`: per-request timeout ceiling, default
+  8 seconds (accepted range 1–12). The synchronous evaluation route divides a
+  24-second provider-call budget across two sequential NIM calls per requested
+  round. That yields a 4-second cap per call at three rounds, 6 seconds at two
+  rounds, or the configured ceiling for one round. Four seconds remain in the
+  28-second Lambda timeout for local sandbox, policy, and audit work.
 - `SHADOW_HUNTER_NIM_MAX_TOKENS`: client-wide completion cap, default 512
   (accepted range 384–4096; individual agent calls use 384).
 
 The hosted base URL is intentionally not caller-controlled. It is restricted to
 NVIDIA's HTTPS API Catalog host to prevent server-side request forgery through a
 provider URL override.
+
+Both agents request compact structured answers with `enable_thinking=false`.
+Red additionally sends a strict JSON schema whose scenario ID enum is built from
+the supplied candidate catalogue. This prevents internal reasoning tokens from
+consuming the limited completion budget and reduces free-form schema drift. The
+deterministic Blue checks and the ToolGateway remain authoritative.
 
 For AWS Lambda, set `NvidiaApiKeySecretArn` and `A2AKeysSecretArn` on the
 `infra/app/template.yaml` stack. The API Lambda's conditional IAM statements
