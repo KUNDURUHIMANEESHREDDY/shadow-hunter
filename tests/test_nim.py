@@ -128,6 +128,10 @@ def test_nim_client_applies_an_adaptive_environment_timeout_cap(monkeypatch):
 
     assert client.timeout_seconds == 4.0
 
+    monkeypatch.setenv("SHADOW_HUNTER_NIM_TIMEOUT_SECONDS", "13")
+    with pytest.raises(NIMConfigurationError, match="between 1 and 12"):
+        NIMChatClient.from_environment(timeout_cap_seconds=4)
+
     with pytest.raises(NIMConfigurationError, match="between 1 and 12"):
         NIMChatClient("nvapi-test-secret", timeout_seconds=12.1)
 
