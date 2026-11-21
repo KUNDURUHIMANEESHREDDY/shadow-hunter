@@ -13,6 +13,33 @@ class GatewayError(RuntimeError):
     """A controlled gateway failure safe to return to an API client."""
 
 
+_RESOURCE_DISCLOSURE_REASON_CODES = frozenset(
+    {
+        "ORDER_CONTEXT_MISSING",
+        "ORDER_CONTEXT_INVALID",
+        "RESOURCE_CONTEXT_MISMATCH",
+        "RESOURCE_TENANT_MISMATCH",
+        "RESOURCE_OWNER_MISMATCH",
+    }
+)
+
+
+def public_tool_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Hide resource-existence distinctions at customer-facing tool boundaries.
+
+    The gateway and audit log retain the precise policy reason for trusted
+    internal evaluation and operator investigation. Only the outward copy is
+    normalized.
+    """
+    public_result = dict(result)
+    if (
+        public_result.get("decision") == Decision.DENY.value
+        and public_result.get("reason_code") in _RESOURCE_DISCLOSURE_REASON_CODES
+    ):
+        public_result["reason_code"] = "RESOURCE_NOT_AVAILABLE"
+    return public_result
+
+
 class ToolGateway:
     """Mediates every agent-facing tool call before business logic executes.
 

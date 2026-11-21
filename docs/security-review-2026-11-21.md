@@ -10,7 +10,7 @@
 
 The current implementation has several sound control boundaries: customer and delegated-agent JWT profiles are distinct in Cognito mode; tool calls pass through a fixed allowlist and deterministic policy engine; the model cannot execute refunds; approval capabilities are hashed at rest; SQLite and DynamoDB execution paths re-check stored approval state and order balance; and AWS roles are separated for application data access, audit export, and read-only audit verification.
 
-The source review also found release-relevant gaps. The most important deployment-dependent risk is that the pre-token trigger trusts Cognito tenant/customer attributes while the repository does not provision the user pool or constrain which app clients can write those attributes. Application-level gaps include distinguishable order-lookup denial reasons, no enforced maker-checker rule, an unrecoverable one-time approval token after a page refresh, missing operator-console framing protections, and unbounded per-operator hosted-model evaluation usage.
+The source review also found release-relevant gaps. The most important deployment-dependent risk is that the pre-token trigger trusts Cognito tenant/customer attributes while the repository does not provision the user pool or constrain which app clients can write those attributes. A follow-up remediation has since closed the order-lookup disclosure in the authenticated HTTP and MCP response paths. The remaining application-level gaps are no enforced maker-checker rule, an unrecoverable one-time approval token after a page refresh, missing operator-console framing protections, upstream AgentCore error reflection, and unbounded per-operator hosted-model evaluation usage.
 
 **Do not deploy the customer or operator API to production until the High finding is closed and the Medium findings are fixed or formally accepted with compensating controls.** The AWS deployment gate also remains closed pending formal SAM validation, identity configuration, account/Region confirmation, cost approval, and staging evidence.
 
@@ -31,7 +31,7 @@ Reviewed the current default-branch source and infrastructure relevant to:
 
 The review was read-only. It used source inspection and targeted GitHub default-branch searches for common credential markers. No concrete credential value was surfaced by those searches; generic matches were in scanner rules, documentation, tests, or environment-variable references. This was **not** a full Git-history secret scan, dependency vulnerability scan, static-analysis run, or credential-validity check.
 
-No tests, builds, linters, SAM validators, browser checks, fuzzing, live endpoint calls, AWS API calls, or penetration tests were run in this cycle. The repository's docs/engineering-cycle.md currently prohibits verification commands until the owner explicitly changes that instruction. Source-level observations below therefore remain unconfirmed by runtime tests.
+No tests, builds, linters, SAM validators, browser checks, fuzzing, live endpoint calls, AWS API calls, or penetration tests were run in the original source-review cycle. The owner later authorized the prioritized remediation work and regression testing; follow-up evidence for SH-SEC-001 is recorded below.
 
 ## Findings
 
@@ -39,20 +39,22 @@ No tests, builds, linters, SAM validators, browser checks, fuzzing, live endpoin
 
 - **Severity:** MEDIUM
 - **Confidence:** HIGH
-- **Status:** Open
-- **Affected paths:** [gateway.py](../src/shadow_hunter/gateway.py#L100), [policy.py](../src/shadow_hunter/policy.py#L197), [policy.py](../src/shadow_hunter/policy.py#L225), [policy.py](../src/shadow_hunter/policy.py#L229), [api.py](../src/shadow_hunter/api.py#L319)
+- **Status:** Remediated in local source and regression-tested; staging verification remains pending.
+- **Affected paths:** [gateway.py](../src/shadow_hunter/gateway.py), [api.py](../src/shadow_hunter/api.py), [mcp_server.py](../src/shadow_hunter/mcp_server.py), [policy.py](../src/shadow_hunter/policy.py)
 
 **Evidence**
 
-The gateway loads an order using the caller-supplied order_id before policy evaluation. The policy returns ORDER_CONTEXT_MISSING when the identifier has no record, but returns RESOURCE_TENANT_MISMATCH or RESOURCE_OWNER_MISMATCH when a record exists but belongs to another tenant/customer. The API returns the decision payload, including the reason code, to the authenticated caller.
+The gateway loads an order using the caller-supplied order_id before policy evaluation. The policy retains distinct internal reasons such as ORDER_CONTEXT_MISSING, RESOURCE_TENANT_MISMATCH, and RESOURCE_OWNER_MISMATCH. Before remediation, both HTTP and MCP tool boundaries exposed those distinctions. The follow-up fix normalizes these resource-denial reason codes to RESOURCE_NOT_AVAILABLE in an outward response copy; the gateway result and audit event retain the precise internal reason.
 
 **Impact and precondition**
 
-An authenticated customer or delegated agent able to submit guessed order IDs can distinguish missing IDs from existing foreign resources. The response does not return the foreign order contents, but it provides an order-existence and ownership-classification oracle.
+Before remediation, an authenticated customer or delegated agent able to submit guessed order IDs could distinguish missing IDs from existing foreign resources. The response did not return foreign order contents, but it exposed an order-existence and ownership-classification oracle.
 
-**Recommended remediation**
+**Remediation applied**
 
-Use a customer-scoped data lookup where practical. Normalize outward responses for missing and unauthorized resources to the same non-enumerating result. Preserve the precise internal reason in the audit event for operators. Add tests proving that missing, cross-tenant, and cross-customer identifiers have indistinguishable customer-visible responses while retaining distinct restricted audit evidence.
+The authenticated FastAPI tool route and MCP dispatcher now pass gateway results through a customer-facing response normalizer. Missing, invalid, context-mismatched, cross-tenant, and cross-customer resource denials use the same RESOURCE_NOT_AVAILABLE reason code. The original detailed reason remains in the policy audit event and the internal gateway return, preserving operator investigation and Red/Blue evaluation evidence.
+
+Regression tests exercise nonexistent, cross-tenant, and cross-customer order IDs through both HTTP and MCP. They assert identical public payloads and verify that detailed reason codes remain available through the operator-authenticated audit route.
 
 ### SH-SEC-002 — Approval does not enforce separation of duties
 
@@ -186,7 +188,7 @@ These source observations are positive design controls, not proof that the deplo
 
 | ID | Required evidence before release | Suggested verification |
 |---|---|---|
-| SH-SEC-001 | No customer-visible order-existence oracle | API tests for nonexistent, cross-tenant, and cross-customer IDs; compare public responses and inspect restricted audit distinctions |
+| SH-SEC-001 | No customer-visible order-existence oracle | Local HTTP/MCP regression tests pass for nonexistent, cross-tenant, and cross-customer IDs; staging verification remains pending |
 | SH-SEC-002 | Maker-checker invariant or documented policy exception | SQLite and DynamoDB tests for same-subject deny and independent-operator allow |
 | SH-SEC-003 | Recoverable, auditable one-time approval workflow | Browser test for reload, lost response, token rotation, one-time consumption, and replay |
 | SH-SEC-004 | Operator page cannot be framed by unapproved origins | HTTP header assertions and cross-origin iframe test |
@@ -200,7 +202,7 @@ These source observations are positive design controls, not proof that the deplo
 |---|---|
 | Static source inspection of API/auth/policy/gateway/approval/data paths | Performed; findings above |
 | Targeted default-branch credential-marker search | Performed; no concrete credential value surfaced; not a history scan |
-| Unit / integration / adversarial tests | Not run under the current repository verification policy |
+| Unit / integration / adversarial tests | Follow-up: 23 focused gateway/API/MCP tests passed; 159 tests passed when excluding the Lambda-entrypoint test blocked by missing optional mangum. Full suite: 159 passed, 1 environment failure. |
 | Browser / header / clickjacking checks | Not run |
 | Dependency / SAST / DAST scan | Not run |
 | SAM CLI validation / cfn-lint / package build | Not run |
@@ -211,10 +213,10 @@ These source observations are positive design controls, not proof that the deplo
 
 1. Close SH-SEC-007 by proving customer clients cannot write trusted tenant/customer attributes; complete the real Cognito configuration.
 2. Decide and enforce maker-checker separation (SH-SEC-002).
-3. Remove the order-existence oracle (SH-SEC-001).
+3. **SH-SEC-001 remediated locally:** repeat the response-equivalence check against the deployed API/MCP service during staging verification.
 4. Design an audited, safe approval-token recovery flow (SH-SEC-003).
 5. Add operator response headers and sanitize AgentCore error responses (SH-SEC-004/005).
 6. Add per-operator/global inference budgets and a kill switch (SH-SEC-006).
-7. Obtain explicit owner authorization to change the verification rule in docs/engineering-cycle.md; then add/run regression evidence for every finding and complete formal infrastructure validation.
+7. Keep verification explicitly authorized and scoped per engineering cycle; add/run regression evidence for each remaining finding and complete formal infrastructure validation.
 
 **Verdict:** source-level review is complete for this pass, but the overall security assessment and release verification remain **PARTIAL**. This document does not authorize AWS deployment.

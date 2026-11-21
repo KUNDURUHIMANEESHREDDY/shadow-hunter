@@ -41,9 +41,10 @@ The earlier source-review cycle did not run tests, SAST/DAST, browser checks, SA
 2. **Maker-checker decision (Medium):** decide whether the request's
    originating principal may approve its own request. If not, enforce the
    separation in both SQLite and DynamoDB persistence transitions.
-3. **Order identifier disclosure (Medium):** normalize customer-visible
-   responses for missing and foreign orders while keeping detailed audit
-   reasons restricted to operators.
+3. **Order identifier disclosure (Medium):** remediated locally in the
+   authenticated HTTP and MCP response paths and covered by regression tests.
+   Repeat the response-equivalence check against deployed services in staging
+   before release; detailed audit reasons remain restricted to operators.
 4. **Approval token recovery (Medium):** add a secure, audited recovery or
    rotation workflow for the in-memory-only one-time token.
 5. **Operator console hardening (Low):** add anti-framing and standard browser
@@ -213,7 +214,7 @@ Use a staging account and synthetic orders first. The cleanest end-to-end eviden
 
 Expected result:
 
-1. FastAPI returns `decision=DENY` and reason `RESOURCE_OWNER_MISMATCH`; no order data is returned and no refund state changes.
+1. FastAPI returns `decision=DENY` and public reason `RESOURCE_NOT_AVAILABLE`; no order data is returned and no refund state changes. The restricted operator audit event retains `RESOURCE_OWNER_MISMATCH` as the internal reason.
 2. The response's `trace_id` and `request_id` identify a `POLICY_DECISION` denial in the authenticated operator trace endpoint.
 3. The independent audit verifier reads the matching AUDIT item from the DynamoDB GSI and reads the deterministic S3 object under `audit-events/YYYY/MM/DD/<event_id>.json` using its read-only role.
 4. The verifier confirms the archived JSON bytes match the canonical source event projection and records object keys and SHA-256 hashes in a redacted evidence report. It must not mutate either store.
@@ -225,41 +226,42 @@ Only report the demonstration as passed after recording the actual HTTP response
 
 The templates intentionally create resources that can incur charges: DynamoDB on-demand reads/writes and PITR, S3 storage and retained Object Lock versions, Lambda invocations/compute/logging, SQS, CloudWatch alarms/log retention, API Gateway requests, Cognito feature-tier/token-exchange use, and AgentCore/Bedrock model execution. Costs depend on Region, request volume, retention, model, token use, and enabled features. No cost estimate is asserted here.
 
-## Verification and deployment record
+## Initial source-review verification and deployment record (historical)
+
+During the initial source-review cycle:
 
 - Offline YAML parse and in-template reference checks: passed for all three templates.
-- SAM transform / `sam validate --lint`: not completed; SAM CLI and cfn-lint were unavailable in the current environment.
-- SAM build/package: not run.
-- Unit/integration/adversarial tests: not run under the repository operating contract.
+- SAM transform / `sam validate --lint`, SAM build/package, and runtime tests: not run in that review cycle.
 - CloudFormation deployment/change sets: not run.
 - Cognito, DynamoDB, S3, Lambda, API Gateway, AgentCore, and Gateway resources: not deployed or inspected.
 - End-to-end unauthorized-action demonstration: not run.
+
+Subsequent non-deploying infrastructure validation and local regression evidence are recorded in the sections below and in the per-cycle record.
 
 **Approval gate:** the next AWS action that creates or modifies billable resources requires explicit owner approval. After approval, deploy in the staged order above; do not skip formal template validation or the staging evidence run.
 
 
 ## Current local release-candidate status
 
-- Source baseline: 6b26b6aaea1308706abb1ba3eac375251bd45d25.
-- Architecture document refreshed: [architecture.md](architecture.md).
+- Production-infrastructure review baseline: 6b26b6aaea1308706abb1ba3eac375251bd45d25.
+- SH-SEC-001 remediation baseline: `main` at 18ab9165a3440205d5fdd2f4024a77ca6b66beb9.
+- Architecture document: [architecture.md](architecture.md).
 - Security findings and release-test matrix: [security-review-2026-11-21.md](security-review-2026-11-21.md).
-- Engineering-cycle record: [2026-11-20-local-release-candidate-security-review.md](cycles/2026-11-20-local-release-candidate-security-review.md).
+- Initial security-review record: [2026-11-20-local-release-candidate-security-review.md](cycles/2026-11-20-local-release-candidate-security-review.md).
+- SH-SEC-001 remediation record: [2026-11-20-security-remediation-sh-sec-001.md](cycles/2026-11-20-security-remediation-sh-sec-001.md).
 - Selected Region: ap-southeast-2 (Sydney).
-- Tests/build/lint/SAST/DAST/browser checks: not run in this cycle under the current repository policy.
-- SAM schema validation, cfn-lint, SAM build/package: still not run.
+- SH-SEC-001 follow-up: 23 focused gateway/API/MCP tests passed; the broader suite passed 159 tests when the Lambda-entrypoint test was excluded because optional `mangum` is not installed. The unfiltered suite reported 159 passed and one environment failure.
+- Compilation, repository metadata validation, focused Ruff checks, and `git diff --check`: passed for the SH-SEC-001 working tree.
+- Browser/header checks, SAST/DAST, dependency scans, and deployed-service verification: not run.
+- Four production templates passed standalone CloudFormation lint and SAM build/package; three passed `sam validate --lint`, and the new identity stack passed SAM basic validation (see offline implementation evidence below).
 - Cognito/DynamoDB/S3/Lambda/API Gateway/AgentCore resources: not deployed or inspected.
 - Deployment decision: **NO-GO**.
 
-The next verification action requires the owner to explicitly authorize a change
-to the no-verification rule in docs/engineering-cycle.md. After that,
-run the focused regression matrix in the security report, the full relevant
-test suite, the three documented sam validate --lint commands, and
-non-deploying SAM package/build checks. Creating billable resources remains a
-separate approval gate.
+The next engineering slice is SH-SEC-002 (maker-checker separation of duties). Local verification authorization does not authorize AWS access or resource creation. Creating billable resources remains a separate approval gate.
 
 ## Production-only offline implementation update - 2026-11-20
 
-The owner selected a production-only implementation and explicitly excluded AWS account access and cloud deployment. The following local work is complete; it does not change the overall release verdict above. The seven findings in the linked security review remain release gates, and no live AWS behavior is claimed.
+The owner selected a production-only implementation and explicitly excluded AWS account access and cloud deployment. The following local work is complete; it does not change the overall release verdict above. SH-SEC-001 has since been remediated locally with HTTP/MCP regression coverage; six findings remain open, and no live AWS behavior is claimed.
 
 - All four templates are production-only. The new infra/cognito/identity-stack.yaml defines the User Pool, V3 trigger, separate customer/operator/M2M clients, scopes, operator group, and hosted domain. The customer app client cannot write tenant/customer attributes; the schema attributes are immutable and intended for trusted administrative provisioning.
 - infra/cognito/pre-token-generation.yaml remains an add-on for an existing production User Pool.

@@ -17,9 +17,8 @@ from typing import Any
 from uuid import uuid4
 
 from .auth import CognitoJWTAuthenticator
-from .gateway import ToolGateway
+from .gateway import ToolGateway, public_tool_result
 from .policy import Principal
-
 
 AGENT_MCP_TOOLS = frozenset(
     {"get_order", "check_refund_eligibility", "create_refund_request"}
@@ -249,13 +248,15 @@ def invoke_current_tool(
             "trace_id": trace_id,
         }
 
-    return gateway.invoke(
-        principal=caller.principal,
-        agent_id=caller.agent_id,
-        tool_name=tool_name,
-        arguments=arguments,
-        request_id=request_id,
-        trace_id=trace_id,
+    return public_tool_result(
+        gateway.invoke(
+            principal=caller.principal,
+            agent_id=caller.agent_id,
+            tool_name=tool_name,
+            arguments=arguments,
+            request_id=request_id,
+            trace_id=trace_id,
+        )
     )
 
 

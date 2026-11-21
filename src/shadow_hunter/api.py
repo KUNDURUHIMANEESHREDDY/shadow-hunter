@@ -20,15 +20,15 @@ from .agentcore import (
 from .agents import (
     A2AConfigurationError,
     A2AProtocolError,
-    AgentAuthenticator,
     AdversarialStrategyEngine,
+    AgentAuthenticator,
     BlueAgent,
     EvaluationMetrics,
     RedBlueSimulation,
 )
 from .approvals import ApprovalService
 from .auth import build_authenticator_from_environment
-from .gateway import GatewayError, ToolGateway
+from .gateway import GatewayError, ToolGateway, public_tool_result
 from .mcp_server import build_mcp_runtime
 from .nim import (
     NIMBlueDefenseReasoner,
@@ -38,9 +38,8 @@ from .nim import (
     NIMRedStrategyPlanner,
 )
 from .policy import PolicyConfig, PolicyEngine, Principal
-from .store import SQLiteStore, StoreError
 from .settings import IntegrationSecretStore, IntegrationSettingsError
-
+from .store import SQLiteStore, StoreError
 
 WEB_ROOT = Path(__file__).parent / "web"
 NIM_EVALUATION_TIMEOUT_BUDGET_SECONDS = 24.0
@@ -337,12 +336,14 @@ def create_app(
             ):
                 raise HTTPException(status_code=422, detail=f"Invalid {field}")
         try:
-            return gateway.invoke(
-                principal=principal,
-                tool_name=tool_name,
-                arguments=arguments,
-                request_id=body.get("request_id") or str(uuid4()),
-                trace_id=body.get("trace_id") or str(uuid4()),
+            return public_tool_result(
+                gateway.invoke(
+                    principal=principal,
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    request_id=body.get("request_id") or str(uuid4()),
+                    trace_id=body.get("trace_id") or str(uuid4()),
+                )
             )
         except GatewayError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc

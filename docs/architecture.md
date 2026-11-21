@@ -248,12 +248,17 @@ kept in page memory; they are not shared across page contexts.
 
 ### Current release blockers
 
-The source-level review found an order-existence oracle in customer-visible
-policy reason codes, no enforced maker-checker invariant, an approval-token
-recovery gap after page refresh, missing operator-console framing protections,
-upstream AgentCore error reflection, and no per-operator hosted-inference
-budget. The Cognito trusted-attribute write boundary is a conditional High
-deployment blocker. Findings and required evidence are tracked in
+SH-SEC-001 (order-existence disclosure) is remediated in the local
+authenticated HTTP and MCP response paths: resource-denial reason codes are
+normalized for callers while precise policy reasons remain in restricted audit
+events and internal evaluation results. Local regression tests cover missing,
+cross-tenant, and cross-customer order identifiers; deployed staging verification
+remains pending. Remaining source-level blockers include no enforced
+maker-checker invariant, an approval-token recovery gap after page refresh,
+missing operator-console framing protections, upstream AgentCore error
+reflection, and no per-operator hosted-inference budget. The Cognito
+trusted-attribute write boundary remains a conditional High deployment blocker.
+Findings and required evidence are tracked in
 [the 2026-11-20 security review](security-review-2026-11-21.md).
 
 ### Evidence classification
@@ -262,13 +267,14 @@ deployment blocker. Findings and required evidence are tracked in
   gateway, parameter-bound approval flow, SQLite and DynamoDB adapters,
   operator API, MCP adapter, hosted Red/Blue evaluator, and audit archive
   components.
-- Historically reported but not rerun in this cycle: focused test results and
-  the local synthetic Red/Blue contract smoke result recorded elsewhere in the
-  README/cycle history.
-- Not verified in this cycle: tests, builds, SAST/DAST, dependency scans,
-  browser behavior, SAM transform validation, package build, AWS IAM/user-pool
-  configuration, deployed storage, AgentCore OBO exchange, and end-to-end
-  audit archive evidence.
+- Current local verification for SH-SEC-001: focused HTTP/MCP/gateway tests
+  passed; the Python suite passed with the Lambda-entrypoint test excluded
+  because the optional `mangum` dependency is absent; compilation, repository
+  metadata validation, focused Ruff checks, and diff validation passed.
+- Not verified in this cycle: SAST/DAST, dependency scans, browser behavior,
+  SAM transform validation, package build, AWS IAM/user-pool configuration,
+  deployed storage, AgentCore OBO exchange, and end-to-end audit archive
+  evidence.
 - Not deployed: Cognito, DynamoDB, S3 Object Lock archive, SQS DLQ, Lambda,
   API Gateway, AgentCore Harness, Gateway, Identity provider, or Cedar policy
   attachments.
