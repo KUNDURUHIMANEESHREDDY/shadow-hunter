@@ -6,8 +6,8 @@ Parameters:
   Environment:
     Type: String
     Default: production
-    AllowedValues: [development, staging, production]
-    Description: Selects the table name and deletion-protection behavior.
+    AllowedValues: [production]
+    Description: Production table name; deletion protection is always enabled.
   AuditRetentionDays:
     Type: Number
     Default: 365
@@ -63,7 +63,7 @@ Resources:
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
         RecoveryPeriodInDays: 35
-      DeletionProtectionEnabled: !Equals [!Ref Environment, production]
+      DeletionProtectionEnabled: true
       Tags:
         - Key: Application
           Value: ShadowHunter
@@ -128,12 +128,13 @@ Resources:
             Action: s3:PutObject
             Resource: !Sub '${ShadowHunterAuditArchive.Arn}/audit-events/*'
             Condition:
-              Null:
+              "Null":
                 s3:if-none-match: true
 
   ShadowHunterAuditExportDlq:
     Type: AWS::SQS::Queue
     DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       QueueName: !Sub shadow-hunter-audit-export-dlq-${Environment}
       MessageRetentionPeriod: 1209600
@@ -148,6 +149,7 @@ Resources:
   ShadowHunterAuditExporterLogGroup:
     Type: AWS::Logs::LogGroup
     DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       LogGroupName: !Sub /aws/lambda/shadow-hunter-audit-exporter-${Environment}
       RetentionInDays: 30

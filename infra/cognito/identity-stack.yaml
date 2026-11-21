@@ -1,0 +1,332 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Shadow Hunter Cognito identity foundation with customer, operator and delegated agent clients.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues: [production]
+  UserPoolTier:
+    Type: String
+    AllowedValues: [ESSENTIALS, PLUS]
+    Description: Cognito feature plan. Essentials is the minimum tier for OAuth token exchange.
+  CognitoDomainPrefix:
+    Type: String
+    MinLength: 1
+    MaxLength: 63
+    AllowedPattern: '^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$'
+    Description: Globally unique Cognito prefix domain in the target Region.
+  SesSourceArn:
+    Type: String
+    MinLength: 20
+    MaxLength: 2048
+    AllowedPattern: '^arn:[A-Za-z0-9-]+:ses:[a-z0-9-]+:[0-9]{12}:identity/.+$'
+    Description: SES verified identity ARN in the same Region as the Cognito User Pool.
+  SesFromAddress:
+    Type: String
+    MinLength: 3
+    MaxLength: 254
+    AllowedPattern: '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+$'
+    Description: From email address belonging to the SES verified identity.
+  CustomerCallbackUrl:
+    Type: String
+    MinLength: 1
+    MaxLength: 1024
+    AllowedPattern: '^https://[^#]+$'
+    Description: HTTPS callback URL for the customer sign-in application.
+  CustomerLogoutUrl:
+    Type: String
+    MinLength: 1
+    MaxLength: 1024
+    AllowedPattern: '^https://[^#]+$'
+    Description: HTTPS post-logout URL for the customer sign-in application.
+  OperatorCallbackUrl:
+    Type: String
+    MinLength: 1
+    MaxLength: 1024
+    AllowedPattern: '^https://[^#]+$'
+    Description: HTTPS operator callback URL, normally the deployed /operator route.
+  OperatorLogoutUrl:
+    Type: String
+    MinLength: 1
+    MaxLength: 1024
+    AllowedPattern: '^https://[^#]+$'
+    Description: HTTPS post-logout URL for the operator console.
+
+Resources:
+  CognitoPreTokenGenerationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub shadow-hunter-cognito-pre-token-${Environment}
+      Runtime: python3.12
+      Handler: cognito_pretoken.handler
+      CodeUri: ../../src/shadow_hunter/
+      MemorySize: 128
+      Timeout: 5
+      ReservedConcurrentExecutions: 2
+      Policies:
+        - AWSLambdaBasicExecutionRole
+      Description: Copies trusted tenant/customer attributes into Cognito access tokens.
+
+  ShadowHunterUserPool:
+    Type: AWS::Cognito::UserPool
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      UserPoolName: !Sub shadow-hunter-${Environment}
+      UserPoolTier: !Ref UserPoolTier
+      DeletionProtection: ACTIVE
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      EmailConfiguration:
+        EmailSendingAccount: DEVELOPER
+        SourceArn: !Ref SesSourceArn
+        From: !Ref SesFromAddress
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+        InviteMessageTemplate:
+          EmailSubject: Shadow Hunter account invitation
+          EmailMessage: 'Your Shadow Hunter username is {username}. Temporary password: {####}'
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      MfaConfiguration: "ON"
+      EnabledMfas:
+        - SOFTWARE_TOKEN_MFA
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 14
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          RequireUppercase: true
+          TemporaryPasswordValidityDays: 3
+      UserAttributeUpdateSettings:
+        AttributesRequireVerificationBeforeUpdate:
+          - email
+      Schema:
+        - AttributeDataType: String
+          Name: email
+          Required: true
+          Mutable: true
+          StringAttributeConstraints:
+            MinLength: "5"
+            MaxLength: "254"
+        - AttributeDataType: String
+          Name: tenant_id
+          Required: false
+          Mutable: false
+          DeveloperOnlyAttribute: false
+          StringAttributeConstraints:
+            MinLength: "1"
+            MaxLength: "128"
+        - AttributeDataType: String
+          Name: customer_id
+          Required: false
+          Mutable: false
+          DeveloperOnlyAttribute: false
+          StringAttributeConstraints:
+            MinLength: "1"
+            MaxLength: "128"
+      LambdaConfig:
+        PreTokenGenerationConfig:
+          LambdaArn: !GetAtt CognitoPreTokenGenerationFunction.Arn
+          LambdaVersion: V3_0
+      UserPoolTags:
+        Application: ShadowHunter
+        Environment: !Ref Environment
+
+  CognitoPreTokenGenerationInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt CognitoPreTokenGenerationFunction.Arn
+      Principal: cognito-idp.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !GetAtt ShadowHunterUserPool.Arn
+
+  ShadowHunterCognitoDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Ref CognitoDomainPrefix
+      UserPoolId: !Ref ShadowHunterUserPool
+
+  ShadowHunterCustomerResourceServer:
+    Type: AWS::Cognito::UserPoolResourceServer
+    Properties:
+      UserPoolId: !Ref ShadowHunterUserPool
+      Identifier: shadow-hunter
+      Name: Shadow Hunter customer API
+      Scopes:
+        - ScopeName: customer
+          ScopeDescription: Access the authenticated customer's Shadow Hunter API.
+
+  ShadowHunterApiResourceServer:
+    Type: AWS::Cognito::UserPoolResourceServer
+    Properties:
+      UserPoolId: !Ref ShadowHunterUserPool
+      Identifier: shadow-hunter-api
+      Name: Shadow Hunter delegated API
+      Scopes:
+        - ScopeName: refunds
+          ScopeDescription: Delegated access to the allowlisted refund-agent tools.
+
+  ShadowHunterAgentResourceServer:
+    Type: AWS::Cognito::UserPoolResourceServer
+    Properties:
+      UserPoolId: !Ref ShadowHunterUserPool
+      Identifier: shadow-hunter-agent
+      Name: Shadow Hunter agent identity
+      Scopes:
+        - ScopeName: actor
+          ScopeDescription: Identify the Shadow Hunter agent as a delegated actor.
+
+  ShadowHunterCustomerAppClient:
+    Type: AWS::Cognito::UserPoolClient
+    DependsOn:
+      - ShadowHunterCustomerResourceServer
+      - ShadowHunterApiResourceServer
+    Properties:
+      ClientName: !Sub shadow-hunter-customer-${Environment}
+      UserPoolId: !Ref ShadowHunterUserPool
+      GenerateSecret: false
+      EnableTokenRevocation: true
+      PreventUserExistenceErrors: ENABLED
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthScopes:
+        - openid
+        - email
+        - shadow-hunter/customer
+        - shadow-hunter-api/refunds
+      CallbackURLs:
+        - !Ref CustomerCallbackUrl
+      LogoutURLs:
+        - !Ref CustomerLogoutUrl
+      SupportedIdentityProviders:
+        - COGNITO
+      ReadAttributes:
+        - email
+        - email_verified
+      WriteAttributes:
+        - email
+      AccessTokenValidity: 15
+      IdTokenValidity: 15
+      RefreshTokenValidity: 30
+      TokenValidityUnits:
+        AccessToken: minutes
+        IdToken: minutes
+        RefreshToken: days
+
+  ShadowHunterOperatorAppClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub shadow-hunter-operator-${Environment}
+      UserPoolId: !Ref ShadowHunterUserPool
+      GenerateSecret: false
+      EnableTokenRevocation: true
+      PreventUserExistenceErrors: ENABLED
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthScopes:
+        - openid
+        - email
+      CallbackURLs:
+        - !Ref OperatorCallbackUrl
+      LogoutURLs:
+        - !Ref OperatorLogoutUrl
+      SupportedIdentityProviders:
+        - COGNITO
+      ReadAttributes:
+        - email
+        - email_verified
+      WriteAttributes:
+        - email
+      AccessTokenValidity: 15
+      IdTokenValidity: 15
+      RefreshTokenValidity: 30
+      TokenValidityUnits:
+        AccessToken: minutes
+        IdToken: minutes
+        RefreshToken: days
+
+  ShadowHunterAgentAppClient:
+    Type: AWS::Cognito::UserPoolClient
+    DependsOn:
+      - ShadowHunterApiResourceServer
+      - ShadowHunterAgentResourceServer
+    Properties:
+      ClientName: !Sub shadow-hunter-agent-m2m-${Environment}
+      UserPoolId: !Ref ShadowHunterUserPool
+      GenerateSecret: true
+      EnableTokenRevocation: true
+      PreventUserExistenceErrors: ENABLED
+      ExplicitAuthFlows:
+        - ALLOW_TOKEN_EXCHANGE_DELEGATION
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows:
+        - client_credentials
+      AllowedOAuthScopes:
+        - shadow-hunter-agent/actor
+        - shadow-hunter-api/refunds
+      AccessTokenValidity: 10
+      TokenValidityUnits:
+        AccessToken: minutes
+
+  ShadowHunterOperatorGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: shadow_hunter_operators
+      Description: Operators authorized for Shadow Hunter approval and administration APIs.
+      Precedence: 1
+      UserPoolId: !Ref ShadowHunterUserPool
+
+Outputs:
+  UserPoolId:
+    Description: Cognito User Pool ID.
+    Value: !Ref ShadowHunterUserPool
+  CognitoIssuer:
+    Description: Issuer URL used by Shadow Hunter JWT verifiers.
+    Value: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${ShadowHunterUserPool}
+  CognitoHostedUiDomain:
+    Description: Hosted UI base domain used by operator PKCE login.
+    Value: !Sub https://${CognitoDomainPrefix}.auth.${AWS::Region}.amazoncognito.com
+  CognitoDomainPrefix:
+    Description: Cognito hosted domain prefix.
+    Value: !Ref CognitoDomainPrefix
+  CustomerClientId:
+    Description: Public customer app-client ID.
+    Value: !Ref ShadowHunterCustomerAppClient
+  OperatorClientId:
+    Description: Public operator app-client ID.
+    Value: !Ref ShadowHunterOperatorAppClient
+  AgentAppClientId:
+    Description: Dedicated M2M app-client ID. Verify the issued actor token sub before using it as CognitoActorSubject.
+    Value: !Ref ShadowHunterAgentAppClient
+  ToolAudience:
+    Description: Resource-server audience expected in delegated API access tokens.
+    Value: shadow-hunter-api
+  CustomerScope:
+    Description: Customer access-token scope.
+    Value: shadow-hunter/customer
+  ToolScope:
+    Description: Delegated tool access-token scope.
+    Value: shadow-hunter-api/refunds
+  AgentActorScope:
+    Description: Agent actor-token scope for AgentCore M2M client-credentials flow.
+    Value: shadow-hunter-agent/actor
+  OperatorGroup:
+    Description: Cognito group required by operator API routes.
+    Value: shadow_hunter_operators

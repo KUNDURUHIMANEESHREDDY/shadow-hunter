@@ -29,9 +29,11 @@ or the DynamoDB table; those prerequisites are deployed separately.
 
 1. Deploy infra/data/dynamodb.yaml and record its TableName and TableArn
    outputs.
-2. Configure Cognito customer/operator app clients, resource-server scopes,
-   pre-token-generation V3 trigger, and delegated token exchange as described
-   in infra/cognito/README.md.
+2. Use infra/cognito/identity-stack.yaml for a new production User Pool, or
+   infra/cognito/pre-token-generation.yaml only for an existing pool. Configure
+   the required SES sender, hosted domain, customer/operator callbacks, V3
+   trigger, scopes, and delegated token exchange as described in
+   infra/cognito/README.md.
 3. Deploy the AgentCore Harness and Gateway, attach Cedar in ENFORCE mode,
    configure the Harness CUSTOM_JWT authorizer, and configure the Gateway
    target with OBO TOKEN_EXCHANGE as described in infra/agentcore/README.md.
@@ -57,6 +59,7 @@ Supply these parameters when prompted:
 - CognitoIssuer
 - CognitoCustomerClientId
 - CognitoOperatorClientId
+- CognitoHostedUiDomain (required HTTPS Cognito Hosted UI base URL)
 - CognitoToolAudience
 - CognitoActorSubject
 - RefundLimitMinor (set the approved amount in minor units)
@@ -95,12 +98,10 @@ session-manager lifespan; the Lambda entrypoint uses lifespan=off.
 ## Operational boundaries
 
 - SHADOW_HUNTER_DEMO_MODE is forced off in this template.
-- The deployed store is DynamoDB; SQLite is reserved for local development.
+- The production template accepts only Environment=production. SQLite remains a local-only adapter.
 - The DynamoDB refund operation still updates the Shadow Hunter demo ledger.
   It does not call a payment processor or send money.
 - The Lambda role does not have permissions to create, update, or delete
   infrastructure.
-- Review API throttles, Lambda concurrency, logs retention, and the AWS
-  account's cost controls before deploying.
-- The template is authored but untested. No SAM build, CloudFormation
-  validation, or AWS deployment has been run.
+- This guide describes a future production deployment. No AWS account, Region, credentials, or resources are used by the local validation workflow.
+- Local SAM validate --lint, standalone cfn-lint, and SAM build passed for this template. This does not verify AWS deployment, live Cognito authorization, or service-side integration; no AWS resources have been deployed.

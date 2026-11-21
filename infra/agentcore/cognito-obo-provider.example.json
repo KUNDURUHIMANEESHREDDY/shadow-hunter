@@ -1,0 +1,25 @@
+{
+  "name": "shadow-hunter-cognito-obo",
+  "credentialProviderVendor": "CustomOauth2",
+  "oauth2ProviderConfigInput": {
+    "customOauth2ProviderConfig": {
+      "oauthDiscovery": {
+        "discoveryUrl": "https://cognito-idp.<region>.amazonaws.com/<user-pool-id>/.well-known/openid-configuration"
+      },
+      "clientId": "<agent-m2m-app-client-id>",
+      "clientSecretSource": "EXTERNAL",
+      "clientSecretConfig": {
+        "secretId": "<secrets-manager-secret-arn>",
+        "jsonKey": "clientSecret"
+      },
+      "clientAuthenticationMethod": "CLIENT_SECRET_BASIC",
+      "onBehalfOfTokenExchangeConfig": {
+        "grantType": "TOKEN_EXCHANGE",
+        "tokenExchangeGrantTypeConfig": {
+          "actorTokenContent": "M2M",
+          "actorTokenScopes": ["shadow-hunter-agent/actor"]
+        }
+      }
+    }
+  }
+}

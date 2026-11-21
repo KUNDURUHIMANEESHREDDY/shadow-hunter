@@ -10,13 +10,14 @@ from shadow_hunter.cognito_pretoken import handler
 def cognito_event(
     *,
     trigger_source: str = "TokenGeneration_Authentication",
-    version: str = "2",
+    version: str = "3",
     attributes: dict | None = None,
 ) -> dict:
     return {
         "version": version,
         "triggerSource": trigger_source,
         "request": {
+            "groupConfiguration": {"groupsToOverride": []},
             "userAttributes": attributes
             if attributes is not None
             else {
@@ -107,6 +108,42 @@ def test_missing_or_invalid_identity_attributes_fail_token_issuance(attributes):
         handler(cognito_event(attributes=attributes), None)
 
 
-def test_v1_trigger_version_is_rejected():
+def test_non_v3_trigger_versions_are_rejected():
     with pytest.raises(ValueError):
         handler(cognito_event(version="1"), None)
+
+
+def test_operator_group_can_mint_operator_token_without_customer_attributes():
+    event = cognito_event(attributes={"sub": "operator-subject"})
+    event["request"]["groupConfiguration"]["groupsToOverride"] = [
+        "shadow_hunter_operators"
+    ]
+    original_response = copy.deepcopy(event["response"])
+
+    result = handler(event, None)
+
+    assert result["response"] == original_response
+
+
+def test_missing_customer_attributes_without_operator_group_fail_closed():
+    event = cognito_event(attributes={"sub": "ordinary-user"})
+    event["request"]["groupConfiguration"]["groupsToOverride"] = ["customers"]
+
+    with pytest.raises(ValueError, match="trusted tenant and customer"):
+        handler(event, None)
+
+
+def test_operator_group_never_receives_customer_claim_overrides():
+    event = cognito_event()
+    event["request"]["groupConfiguration"]["groupsToOverride"] = [
+        "shadow_hunter_operators"
+    ]
+    original_response = copy.deepcopy(event["response"])
+
+    result = handler(event, None)
+
+    assert result["response"] == original_response
+
+def test_v2_trigger_version_is_rejected_for_production_identity():
+    with pytest.raises(ValueError, match="V3_0"):
+        handler(cognito_event(version="2"), None)

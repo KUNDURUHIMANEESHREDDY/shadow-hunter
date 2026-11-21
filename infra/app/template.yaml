@@ -6,7 +6,7 @@ Parameters:
   Environment:
     Type: String
     Default: production
-    AllowedValues: [development, staging, production]
+    AllowedValues: [production]
   DynamoDBTableName:
     Type: String
     Description: TableName output from infra/data/dynamodb.yaml.
@@ -24,7 +24,6 @@ Parameters:
     Description: Separate Cognito app-client ID for operator access.
   CognitoHostedUiDomain:
     Type: String
-    Default: ''
     Description: HTTPS Cognito hosted UI domain used for operator authorization-code login.
   CognitoToolAudience:
     Type: String

@@ -49,6 +49,12 @@ audience, and API scope with values registered in the Cognito user pool.
 Cognito's resource server and token-exchange app-client configuration must
 permit the requested scope and audience.
 
+For Cognito, keep the Gateway target custom parameter subject_token_type=
+urn:ietf:params:oauth:token-type:access_token. The generic AgentCore token-
+exchange default is JWT; Cognito expects the access-token type. Also set
+audience=shadow-hunter-api and request only shadow-hunter-api/refunds. The exact
+target configuration is in gateway-target-oauth.example.json.
+
 ### Gateway target outbound authorization example
 
 The OpenAPI `BearerAuth` declaration describes the target API's authentication

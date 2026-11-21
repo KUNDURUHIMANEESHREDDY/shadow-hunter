@@ -88,8 +88,8 @@ class CognitoJWTAuthenticator:
         tool_audience: str,
         tool_scope: str,
         actor_subject: str,
+        operator_client_id: str,
         operator_group: str = "shadow_hunter_operators",
-        operator_client_id: str | None = None,
         jwks_client: Any | None = None,
     ) -> None:
         parsed = urlsplit(issuer)
@@ -108,6 +108,7 @@ class CognitoJWTAuthenticator:
             "tool_audience": tool_audience,
             "tool_scope": tool_scope,
             "actor_subject": actor_subject,
+            "operator_client_id": operator_client_id,
             "operator_group": operator_group,
         }
         if any(
@@ -123,9 +124,14 @@ class CognitoJWTAuthenticator:
         self.customer_scope = customer_scope
         self.tool_audience = tool_audience
         self.tool_scope = tool_scope
+        if hmac.compare_digest(customer_client_id, operator_client_id):
+            raise AuthenticationConfigurationError(
+                "Customer and operator Cognito app clients must be distinct"
+            )
+
         self.actor_subject = actor_subject
         self.operator_group = operator_group
-        self.operator_client_id = operator_client_id or customer_client_id
+        self.operator_client_id = operator_client_id
 
         try:
             import jwt
@@ -151,6 +157,7 @@ class CognitoJWTAuthenticator:
             "tool_audience": "SHADOW_HUNTER_COGNITO_TOOL_AUDIENCE",
             "tool_scope": "SHADOW_HUNTER_COGNITO_TOOL_SCOPE",
             "actor_subject": "SHADOW_HUNTER_COGNITO_ACTOR_SUB",
+            "operator_client_id": "SHADOW_HUNTER_COGNITO_OPERATOR_CLIENT_ID",
         }
         values = {
             key: os.environ.get(env_name, "").strip()
@@ -172,10 +179,7 @@ class CognitoJWTAuthenticator:
             operator_group=os.environ.get(
                 "SHADOW_HUNTER_COGNITO_OPERATOR_GROUP",
                 "shadow_hunter_operators",
-            ).strip(),
-            operator_client_id=os.environ.get(
-                "SHADOW_HUNTER_COGNITO_OPERATOR_CLIENT_ID"
-            ) or None,
+            ).strip()
         )
 
     def authenticate_customer(self, token: str | None) -> Principal | None:
@@ -243,6 +247,10 @@ class CognitoJWTAuthenticator:
             # fall back to local identity or authorize a tool call.
             return None
         if not isinstance(claims, Mapping) or claims.get("token_use") != "access":
+            return None
+        if audience is not None and claims.get("aud") != audience:
+            # Cognito issues one resource audience for this delegated profile.
+            # Reject arrays or multi-resource tokens to prevent audience confusion.
             return None
         return claims
 

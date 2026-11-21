@@ -62,11 +62,12 @@ the actual Cognito user-pool and app-client configuration.
 
 ## Template inventory and review
 
-The repository intentionally uses three independently deployable SAM stacks rather than one all-in-one root stack. Their dependencies are passed as outputs and parameters.
+The production implementation now has four independently validated SAM templates: a new Cognito identity stack, an existing-pool Cognito trigger add-on, the data stack, and the application stack. Their dependencies are passed as outputs and parameters.
 
 | Template | Main resources | Dependency / interface |
 |---|---|---|
-| `infra/cognito/pre-token-generation.yaml` | Pre-token Lambda and Cognito invoke permission | Requires an already-existing User Pool ID; outputs the Lambda ARN. Pool trigger association is a separate step. |
+| `infra/cognito/identity-stack.yaml` | Production User Pool, V3 trigger, customer/operator/agent clients, resource servers, operator group and hosted domain | Requires production SES identity and HTTPS customer/operator callback/logout URLs. |
+| `infra/cognito/pre-token-generation.yaml` | Pre-token Lambda and Cognito invoke permission | Existing-pool add-on only; requires an already-existing User Pool ID. Pool trigger association is a separate step. |
 | `infra/data/dynamodb.yaml` | DynamoDB table/GSI/stream, S3 Object Lock archive, exporter Lambda/role, SQS DLQ, CloudWatch alarm | Outputs table name/ARN, archive bucket name/ARN, and DLQ URL. |
 | `infra/app/template.yaml` | FastAPI Lambda, API Gateway HTTP API, route JWT authorizers, logs and runtime IAM role | Requires data-stack outputs and exact Cognito issuer/client/scope/actor values. Harness ARN is optional during initial API deployment. |
 
@@ -74,7 +75,8 @@ The repository intentionally uses three independently deployable SAM stacks rath
 
 The template-relative code locations correspond to the checked-in handlers and dependency manifests:
 
-- Cognito stack: `../../src/shadow_hunter/`, handler `cognito_pretoken.handler`, nested `src/shadow_hunter/requirements.txt`.
+- New Cognito identity stack: `../../src/shadow_hunter/`, handler `cognito_pretoken.handler`, nested `src/shadow_hunter/requirements.txt`.
+- Existing-pool Cognito trigger add-on: `../../src/shadow_hunter/`, handler `cognito_pretoken.handler`, nested `src/shadow_hunter/requirements.txt`.
 - Data stack: `../../src/shadow_hunter/`, handler `audit_exporter.handler`, nested `src/shadow_hunter/requirements.txt`.
 - Application stack: `../../src/`, handler `shadow_hunter.lambda_handler.handler`, `src/requirements.txt`.
 
@@ -257,3 +259,30 @@ run the focused regression matrix in the security report, the full relevant
 test suite, the three documented sam validate --lint commands, and
 non-deploying SAM package/build checks. Creating billable resources remains a
 separate approval gate.
+
+## Production-only offline implementation update - 2026-11-20
+
+The owner selected a production-only implementation and explicitly excluded AWS account access and cloud deployment. The following local work is complete; it does not change the overall release verdict above. The seven findings in the linked security review remain release gates, and no live AWS behavior is claimed.
+
+- All four templates are production-only. The new infra/cognito/identity-stack.yaml defines the User Pool, V3 trigger, separate customer/operator/M2M clients, scopes, operator group, and hosted domain. The customer app client cannot write tenant/customer attributes; the schema attributes are immutable and intended for trusted administrative provisioning.
+- infra/cognito/pre-token-generation.yaml remains an add-on for an existing production User Pool.
+- Customer and operator app-client IDs must be distinct. The V3-only trigger fails closed for customer/delegated events missing trusted tenant/customer attributes, leaves M2M actor events unchanged, and passes operator-group events through without customer claims.
+- The application requires the separate operator client ID and exact single delegated resource audience.
+- infra/agentcore/cognito-obo-provider.example.json is a secret-free external Secrets Manager reference example. No credential values are included.
+- Data-stack S3 policy Null key and retention settings are corrected; production deletion protection is always enabled.
+
+### Local verification evidence
+
+Environment: Windows working tree with WSL2 Ubuntu; Python 3.12.16; SAM CLI 1.174.0; standalone cfn-lint 1.61.0.
+
+- Full Python suite: 158 passed.
+- Focused identity/authentication/trigger suite: 35 passed.
+- Bandit on src/shadow_hunter/auth.py and src/shadow_hunter/cognito_pretoken.py: 0 findings.
+- Semgrep p/python: 151 rules across both changed authentication modules, 0 findings.
+- Standalone cfn-lint 1.61.0: all four production templates passed.
+- SAM validate --lint: existing-pool Cognito trigger, data, and API templates passed. SAM basic validation passed for the new Cognito identity template; the bundled SAM schema is older than the current standalone cfn-lint schema for ALLOW_TOKEN_EXCHANGE_DELEGATION.
+- SAM build --no-use-container: all four templates passed.
+- Repository validator, Python compilation, app dependency check, JSON parsing and git diff --check: passed.
+- No AWS CLI/API calls, account lookup, credentials, live service tests, deployments, change sets, or billable resources were used.
+
+The Cognito trusted-attribute write boundary still requires live account configuration evidence. Maker-checker, order-existence disclosure, approval-token recovery, anti-framing, upstream error reflection, and hosted-inference usage-budget findings also remain unresolved or require explicit risk acceptance. The release decision therefore remains NO-GO.

@@ -46,6 +46,7 @@ def cognito_auth(public_key):
         tool_audience="shadow-hunter-api",
         tool_scope="shadow-hunter-api/refunds",
         actor_subject="refund-agent-client",
+        operator_client_id="operator-client",
         operator_group="shadow_hunter_operators",
         jwks_client=StaticJWKClient(public_key),
     )
@@ -133,7 +134,11 @@ def test_operator_requires_configured_cognito_group(signing_material):
     private_key, public_key = signing_material
     auth = cognito_auth(public_key)
     claims = base_claims()
+    claims["client_id"] = "customer-client"
     claims["cognito:groups"] = ["shadow_hunter_operators"]
+    assert auth.authenticate_operator(issue_token(private_key, claims)) is None
+
+    claims["client_id"] = "operator-client"
     token = issue_token(private_key, claims)
     assert auth.authenticate_operator(token) == "customer-subject-123"
 
@@ -162,3 +167,88 @@ def test_auth_mode_selection_fails_closed(monkeypatch):
     monkeypatch.setenv("SHADOW_HUNTER_AUTH_MODE", "unknown")
     with pytest.raises(AuthenticationConfigurationError):
         build_authenticator_from_environment()
+
+
+def test_operator_client_id_is_required_and_separate(signing_material):
+    _, public_key = signing_material
+    with pytest.raises(AuthenticationConfigurationError):
+        CognitoJWTAuthenticator(
+            issuer="https://cognito-idp.us-east-1.amazonaws.com/us-east-1_test",
+            customer_client_id="customer-client",
+            customer_scope="shadow-hunter/customer",
+            tool_audience="shadow-hunter-api",
+            tool_scope="shadow-hunter-api/refunds",
+            actor_subject="refund-agent-client",
+            operator_client_id="customer-client",
+            jwks_client=StaticJWKClient(public_key),
+        )
+
+
+def test_operator_client_id_must_be_present_in_production_environment(monkeypatch):
+    monkeypatch.setenv(
+        "SHADOW_HUNTER_COGNITO_ISSUER",
+        "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_test",
+    )
+    monkeypatch.setenv("SHADOW_HUNTER_COGNITO_CUSTOMER_CLIENT_ID", "customer-client")
+    monkeypatch.setenv("SHADOW_HUNTER_COGNITO_TOOL_AUDIENCE", "shadow-hunter-api")
+    monkeypatch.setenv("SHADOW_HUNTER_COGNITO_TOOL_SCOPE", "shadow-hunter-api/refunds")
+    monkeypatch.setenv("SHADOW_HUNTER_COGNITO_ACTOR_SUB", "refund-agent-client")
+    monkeypatch.delenv("SHADOW_HUNTER_COGNITO_OPERATOR_CLIENT_ID", raising=False)
+
+    with pytest.raises(
+        AuthenticationConfigurationError,
+        match="SHADOW_HUNTER_COGNITO_OPERATOR_CLIENT_ID",
+    ):
+        CognitoJWTAuthenticator.from_environment()
+
+
+@pytest.mark.parametrize("token_use", ["id", "refresh", ""])
+def test_all_production_profiles_reject_non_access_tokens(signing_material, token_use):
+    private_key, public_key = signing_material
+    auth = cognito_auth(public_key)
+    claims = base_claims()
+    claims["token_use"] = token_use
+    claims["aud"] = "shadow-hunter-api"
+    claims["act"] = {"sub": "refund-agent-client"}
+    token = issue_token(private_key, claims)
+
+    assert auth.authenticate_customer(token) is None
+    assert auth.authenticate_gateway_tool(token) is None
+    assert auth.authenticate_operator(token) is None
+
+
+def test_customer_profile_rejects_wrong_issuer_and_expired_tokens(signing_material):
+    private_key, public_key = signing_material
+    auth = cognito_auth(public_key)
+
+    claims = base_claims()
+    claims["iss"] = "https://attacker.example.invalid"
+    assert auth.authenticate_customer(issue_token(private_key, claims)) is None
+
+    claims = base_claims()
+    claims["exp"] = int((datetime.now(timezone.utc) - timedelta(minutes=2)).timestamp())
+    assert auth.authenticate_customer(issue_token(private_key, claims)) is None
+
+
+def test_gateway_profile_rejects_multi_audience_tokens(signing_material):
+    private_key, public_key = signing_material
+    auth = cognito_auth(public_key)
+    claims = base_claims()
+    claims["aud"] = ["shadow-hunter-api", "another-resource"]
+    claims["act"] = {"sub": "refund-agent-client"}
+
+    assert auth.authenticate_gateway_tool(issue_token(private_key, claims)) is None
+
+
+def test_all_profiles_reject_invalid_signature(signing_material):
+    _, public_key = signing_material
+    other_private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    auth = cognito_auth(public_key)
+    claims = base_claims()
+    claims["aud"] = "shadow-hunter-api"
+    claims["act"] = {"sub": "refund-agent-client"}
+    token = issue_token(other_private_key, claims)
+
+    assert auth.authenticate_customer(token) is None
+    assert auth.authenticate_gateway_tool(token) is None
+    assert auth.authenticate_operator(token) is None

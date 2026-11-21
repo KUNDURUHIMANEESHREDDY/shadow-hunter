@@ -3,6 +3,10 @@ Transform: AWS::Serverless-2016-10-31
 Description: Shadow Hunter Cognito pre-token-generation claim customizer.
 
 Parameters:
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues: [production]
   UserPoolId:
     Type: String
     Description: Existing Cognito user pool ID that will invoke this function.
@@ -11,7 +15,7 @@ Resources:
   ShadowHunterPreTokenGeneration:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: shadow-hunter-cognito-pre-token
+      FunctionName: !Sub shadow-hunter-cognito-pre-token-${Environment}
       Runtime: python3.12
       Handler: cognito_pretoken.handler
       CodeUri: ../../src/shadow_hunter/
