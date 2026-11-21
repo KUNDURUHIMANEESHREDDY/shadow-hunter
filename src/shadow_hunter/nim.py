@@ -247,6 +247,10 @@ class NIMChatClient:
             )
         except ValueError as exc:
             raise NIMConfigurationError("NIM timeout or token limit is invalid") from exc
+        if not 1 <= timeout <= MAX_TIMEOUT_SECONDS:
+            raise NIMConfigurationError(
+                f"NIM timeout must be between 1 and {MAX_TIMEOUT_SECONDS:g} seconds"
+            )
         if timeout_cap_seconds is not None:
             if (
                 isinstance(timeout_cap_seconds, bool)
@@ -272,7 +276,6 @@ class NIMChatClient:
         seed: int,
         max_tokens: int | None = None,
         response_schema: Mapping[str, Any] | None = None,
-        reasoning_budget: int | None = None,
     ) -> dict[str, Any]:
         model = _model_name("NIM model", model)
         if (
@@ -293,12 +296,6 @@ class NIMChatClient:
         ):
             raise NIMInferenceError("NIM completion token limit is invalid")
 
-        if reasoning_budget is not None and (
-            isinstance(reasoning_budget, bool)
-            or not isinstance(reasoning_budget, int)
-            or not 0 <= reasoning_budget <= token_limit
-        ):
-            raise NIMInferenceError("NIM reasoning_budget is invalid")
         # Both agents return compact, schema-constrained classifications or
         # scenario selections. Disable internal reasoning so it cannot consume
         # the same small completion budget needed for the structured answer.
