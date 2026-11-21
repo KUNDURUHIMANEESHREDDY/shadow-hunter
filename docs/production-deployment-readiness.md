@@ -1,9 +1,10 @@
 # Production deployment readiness
 
 - Review date: 2026-11-20
-- Repository head reviewed: `0abe7f8b6eb1fbcfdd13961642a9ef4853e123bd`
-- Status: **PRE-DEPLOYMENT REVIEW; NOT RELEASE-READY**
-- Scope: SAM/CloudFormation review, stack dependencies, validation limits, approval-gated deployment preparation.
+- Repository head reviewed: `6b26b6aaea1308706abb1ba3eac375251bd45d25` (`main`)
+- Selected deployment Region: `ap-southeast-2` (Asia Pacific — Sydney)
+- Status: **NO-GO — SOURCE REVIEW UPDATED; FORMAL VALIDATION AND AWS DEPLOYMENT NOT COMPLETE**
+- Scope: current SAM/CloudFormation templates, stack dependencies, source-level API/auth/data security review, and staged deployment preparation.
 - AWS resources created or changed: **none**.
 
 ## Go / no-go
@@ -11,6 +12,53 @@
 **NO-GO for production deployment at this point.** The templates are structurally coherent, but formal SAM/CloudFormation lint validation has not completed and the Cognito foundation is not fully represented as infrastructure-as-code.
 
 The user-approved boundary for this cycle is template review and preparation only. Do not create stacks, user pools, app clients, buckets, tables, queues, Lambda functions, API Gateway APIs, AgentCore Harnesses, Gateways, credential providers, model invocations, or paid resources until the owner gives explicit AWS deployment approval.
+
+## Current baseline update — 2026-11-20
+
+The prior infrastructure review referenced an older commit. This document now
+uses the current reviewed main baseline. The source-level security review is
+recorded in [security-review-2026-11-21.md](security-review-2026-11-21.md).
+Its overall verdict is **PARTIAL**, and it identifies one conditional High
+Cognito trust-boundary blocker plus six application/operability findings.
+The detailed evidence, confidence, remediation direction, and required
+regression tests are in that report.
+
+The selected target remains ap-southeast-2 (Sydney). AWS's current
+[AgentCore supported-Regions matrix](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agentcore-regions.html)
+lists Sydney support for the Harness, Gateway, Identity, and Policy features
+used by this architecture. Regional availability does not establish account
+entitlement, service quotas, model availability, Cognito token-exchange
+configuration, or pricing; those remain Stage 0 checks.
+
+The release gate is still **NO-GO**. The documentation/source review did not
+run tests, SAST/DAST, browser checks, SAM validation, cfn-lint, packaging, or
+AWS integration. The current docs/engineering-cycle.md explicitly blocks
+verification commands until the owner authorizes a policy change. No AWS
+resources or credentials were accessed.
+
+## Security blockers to close before customer-facing deployment
+
+1. **Trusted Cognito attributes (High, deployment-dependent):** customer
+   app clients must not be able to write custom:tenant_id or
+   custom:customer_id. Enforce controlled administrative provisioning and
+   demonstrate issued token claims in staging.
+2. **Maker-checker decision (Medium):** decide whether the request's
+   originating principal may approve its own request. If not, enforce the
+   separation in both SQLite and DynamoDB persistence transitions.
+3. **Order identifier disclosure (Medium):** normalize customer-visible
+   responses for missing and foreign orders while keeping detailed audit
+   reasons restricted to operators.
+4. **Approval token recovery (Medium):** add a secure, audited recovery or
+   rotation workflow for the in-memory-only one-time token.
+5. **Operator console hardening (Low):** add anti-framing and standard browser
+   security headers.
+6. **Upstream error boundary (Low):** return generic AgentCore failures to
+   customers and retain only redacted diagnostics internally.
+7. **Hosted inference budget (Medium):** introduce per-operator/global usage
+   budgets, alerts, and a kill switch for the NIM evaluation route.
+
+Do not waive the conditional High item based solely on source comments. Verify
+the actual Cognito user-pool and app-client configuration.
 
 ## Template inventory and review
 
@@ -118,7 +166,9 @@ The application still updates a Shadow Hunter demo refund ledger; it does not co
 
 ### Stage 0 — approval and account controls
 
-- Obtain explicit owner approval for the target AWS account, Region, deployment environment, and billable resource creation.
+- Use the owner-selected Region `ap-southeast-2` (Sydney); do not substitute another Region without approval.
+- Obtain explicit owner approval for the target AWS account, deployment environment, and billable resource creation. No account ID, SSO start URL, or authenticated AWS profile was established in this review.
+- Confirm the current AgentCore regional matrix and service quotas for Harness, Gateway, Identity, and Policy; confirm Cognito token-exchange entitlement and the exact hosted model/provider access. Regional service availability is not proof of account enablement.
 - Confirm account-level budgets/alerts and service quotas.
 - Confirm the approved Cognito feature tier, Bedrock model access/Region, AgentCore availability, and token-exchange feature enablement.
 - Review retention requirements before selecting an Object Lock duration or mode. The template defaults to Governance mode for 365 days. Do not select Compliance mode without legal approval.
@@ -127,7 +177,9 @@ The application still updates a Shadow Hunter demo refund ledger; it does not co
 ### Stage 1 — Cognito
 
 - Decide whether to use an existing pool or add a separately reviewed User Pool stack.
-- Ensure the pool has trusted tenant/customer attributes and a controlled provisioning process.
+- Ensure the pool has trusted tenant/customer attributes and a controlled provisioning process. Customer-facing app clients must not have `WriteAttributes` permission for `custom:tenant_id` or `custom:customer_id`; verify no self-service profile path can change them.
+- Require the approved operator MFA posture and a dedicated operator app client/group. Prove that customer users cannot self-assign operator membership.
+- Associate the pre-token Lambda using the required `V3_0` trigger version and capture the deployed trigger configuration as evidence.
 - Create distinct customer and operator app clients, a dedicated agent/M2M client, operator group, resource server, scopes, and the approved OAuth token-exchange/delegation flow.
 - Deploy `infra/cognito/pre-token-generation.yaml` with the selected `UserPoolId`, then associate its output Lambda ARN to the pool as a V3_0 pre-token trigger.
 - Verify customer token claims and the derived OBO token's issuer, subject, audience, scopes, and `act.sub`; never store raw tokens in logs or source control.
@@ -150,6 +202,7 @@ The application still updates a Shadow Hunter demo refund ledger; it does not co
 ### Stage 4 — AgentCore Harness and Gateway
 
 - Configure the Harness `CUSTOM_JWT` authorizer with the correct Cognito discovery URL and allowed customer app client.
+- Verify an operator cannot approve a refund request they originated if the maker-checker policy is enabled; do not rely on role naming alone.
 - Create the Gateway with JWT inbound authentication; add the OpenAPI target using the deployed API base URL and OBO `TOKEN_EXCHANGE` credential-provider configuration.
 - Attach the Cedar policy to the Gateway in **ENFORCE** mode. Confirm the three generated tool action names and ensure `execute_refund` is absent.
 - Restrict the Harness execution role to invoking only the intended Gateway. Keep OAuth client secrets in the AWS-managed credential provider/secret path, never in repository files or parameters.
@@ -167,7 +220,7 @@ Expected result:
 4. The verifier confirms the archived JSON bytes match the canonical source event projection and records object keys and SHA-256 hashes in a redacted evidence report. It must not mutate either store.
 5. Repeat with an unregistered agent tool to demonstrate the application default-deny path. Do not use the outer Cedar denial as the only audited example because a Gateway-side rejection may never reach the application's audit store.
 
-Only report the demonstration as passed after recording the actual HTTP response, correlated audit trace, archive object, and independent read-only comparison. The current code has not demonstrated this in AWS.
+Only report the demonstration as passed after recording the actual HTTP response, correlated audit trace, archive object, and independent read-only comparison. Include tests for missing versus foreign order IDs to verify that customer-visible responses do not disclose resource existence. The current code has not demonstrated this in AWS.
 
 ## Cost surfaces
 
@@ -184,3 +237,23 @@ The templates intentionally create resources that can incur charges: DynamoDB on
 - End-to-end unauthorized-action demonstration: not run.
 
 **Approval gate:** the next AWS action that creates or modifies billable resources requires explicit owner approval. After approval, deploy in the staged order above; do not skip formal template validation or the staging evidence run.
+
+
+## Current local release-candidate status
+
+- Source baseline: 6b26b6aaea1308706abb1ba3eac375251bd45d25.
+- Architecture document refreshed: [architecture.md](architecture.md).
+- Security findings and release-test matrix: [security-review-2026-11-21.md](security-review-2026-11-21.md).
+- Engineering-cycle record: [2026-11-20-local-release-candidate-security-review.md](cycles/2026-11-20-local-release-candidate-security-review.md).
+- Selected Region: ap-southeast-2 (Sydney).
+- Tests/build/lint/SAST/DAST/browser checks: not run in this cycle under the current repository policy.
+- SAM schema validation, cfn-lint, SAM build/package: still not run.
+- Cognito/DynamoDB/S3/Lambda/API Gateway/AgentCore resources: not deployed or inspected.
+- Deployment decision: **NO-GO**.
+
+The next verification action requires the owner to explicitly authorize a change
+to the no-verification rule in docs/engineering-cycle.md. After that,
+run the focused regression matrix in the security report, the full relevant
+test suite, the three documented sam validate --lint commands, and
+non-deploying SAM package/build checks. Creating billable resources remains a
+separate approval gate.

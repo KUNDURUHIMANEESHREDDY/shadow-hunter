@@ -202,3 +202,78 @@ Client. It exposes read tools only to the model, then sends a separate
 sandbox-only write probe through the same proxy. Explicit AgntID decisions
 are distinguished from backend decisions and unattributed errors.
 See `docs/agntid-integration.md`.
+
+
+## Release-candidate status and current trust boundaries — 2026-11-20
+
+The current documentation baseline was reviewed against main commit
+6b26b6aaea1308706abb1ba3eac375251bd45d25. This is a source-level
+release-readiness record, not proof of a working AWS deployment or a verified
+release candidate.
+
+### API ingress map
+
+| Surface | Exposure in the application template | Required identity / boundary |
+|---|---|---|
+| GET /health | Public | Returns operational booleans only; do not add secrets, identifiers, or tenant data |
+| GET /operator | Public static console | Authentication is required before loading operator data or invoking operator actions |
+| GET /operator/config | Public OAuth configuration | May expose hosted-UI domain and public app-client ID only |
+| POST /v1/agent/chat | Customer JWT authorizer | Cognito customer access token; FastAPI verifies client profile and customer scope |
+| POST /v1/agent/tools/{tool_name} | Gateway JWT authorizer | Delegated OBO token with configured resource audience, scope, subject, and act.sub |
+| /v1/operator/{proxy+} | Operator JWT authorizer | Operator app-client profile and configured Cognito operator group |
+| /mcp/ | Not mapped by the public SAM API template | Localhost-only by default; every MCP HTTP request also passes the authentication ASGI boundary |
+
+The public health/configuration routes must remain free of customer data and
+secrets. The operator page has no server-issued anti-framing headers in the
+current implementation. Its OAuth access token and approval capabilities are
+kept in page memory; they are not shared across page contexts.
+
+### Identity and authorization assumptions
+
+- Cognito's pre-token function copies custom:tenant_id and custom:customer_id
+  into access-token claims. These attributes are trusted authorization inputs
+  and must be writable only by a controlled provisioning process. Customer
+  app-client write permissions and self-service profile updates must not allow
+  users to change either attribute.
+- A separate operator app client and operator group are required for the
+  deployed API. The actual user pool, client write permissions, MFA policy,
+  group membership, resource server, token exchange, and V3_0 trigger
+  association are not provisioned by the checked-in Cognito template.
+- The model never supplies the principal. The authenticated route or MCP
+  boundary creates it; the gateway retrieves order facts from trusted storage;
+  the deterministic policy makes the decision.
+- Refund execution remains an operator API path, not an AgentCore or MCP tool.
+  The persistence transition validates the approved action, token hash, policy
+  version, order ownership, currency, eligibility, and remaining balance.
+
+### Current release blockers
+
+The source-level review found an order-existence oracle in customer-visible
+policy reason codes, no enforced maker-checker invariant, an approval-token
+recovery gap after page refresh, missing operator-console framing protections,
+upstream AgentCore error reflection, and no per-operator hosted-inference
+budget. The Cognito trusted-attribute write boundary is a conditional High
+deployment blocker. Findings and required evidence are tracked in
+[the 2026-11-20 security review](security-review-2026-11-21.md).
+
+### Evidence classification
+
+- Implemented in source: JWT verification paths, deterministic policy/tool
+  gateway, parameter-bound approval flow, SQLite and DynamoDB adapters,
+  operator API, MCP adapter, hosted Red/Blue evaluator, and audit archive
+  components.
+- Historically reported but not rerun in this cycle: focused test results and
+  the local synthetic Red/Blue contract smoke result recorded elsewhere in the
+  README/cycle history.
+- Not verified in this cycle: tests, builds, SAST/DAST, dependency scans,
+  browser behavior, SAM transform validation, package build, AWS IAM/user-pool
+  configuration, deployed storage, AgentCore OBO exchange, and end-to-end
+  audit archive evidence.
+- Not deployed: Cognito, DynamoDB, S3 Object Lock archive, SQS DLQ, Lambda,
+  API Gateway, AgentCore Harness, Gateway, Identity provider, or Cedar policy
+  attachments.
+
+The selected AWS target is ap-southeast-2 (Sydney). Regional availability
+does not imply account entitlement, quota, token-exchange feature enablement,
+or model availability. Production deployment remains **NO-GO** until the
+security review and deployment-readiness gates are closed.

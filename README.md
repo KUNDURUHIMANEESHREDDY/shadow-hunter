@@ -158,7 +158,7 @@ ChatGPT task automations currently support daily, weekly, and monthly recurring 
 
 | Component | Current state | Evidence / next action |
 |---|---|---|
-| GitHub repository | PUBLIC; FOUNDATION PUSHED | Commit `353e5c8` on `main`; remote working tree clean |
+| GitHub repository | PUBLIC; CURRENT MAIN BASELINE REVIEWED | Reviewed commit `6b26b6a` on `main`; local clone and working-tree state not inspected in this cycle |
 | Local Windows clone | CREATED | `C:\Users\himan\projects\shadow-hunter` |
 | Product specification | DRAFTED | This README; refine against final AWS rules |
 | MIT project license | COMMITTED TO MAIN | Root `LICENSE`; initial repository commit `353e5c8` |
@@ -179,13 +179,14 @@ ChatGPT task automations currently support daily, weekly, and monthly recurring 
 | AWS persistence | DYNAMODB ADAPTER + TABLE TEMPLATE ADDED — UNTESTED / NOT DEPLOYED | Transactional adapter preserves the SQLiteStore contract; table template uses GSI1, on-demand capacity, KMS encryption, 35-day PITR and TTL cleanup for expired A2A nonce claims. |
 | Audit archive | OBJECT LOCK EXPORT + RECONCILIATION / DLQ REPLAY / CONTENT VERIFICATION ADDED — UNTESTED / NOT DEPLOYED | Conditional S3 writes, redacted events, key-level reconciliation, dry-run-first replay, and a read-only source-row/object-byte verifier with SHA-256 summaries; SQS DLQ holds metadata only and stream records expire after 24 hours. |
 | Lambda/API deployment | SAM + JWT ROUTES + SCOPED NIM/A2A SECRET READ-WRITE — NOT DEPLOYED | SAM creates retained NVIDIA/A2A Secrets Manager secrets by default (or accepts exact external ARNs); Lambda receives only GetSecretValue/PutSecretValue on those targets. Cognito Hosted UI domain is configurable. |
-| Infrastructure template review | OFFLINE STRUCTURAL REVIEW PASSED — FORMAL SCHEMA VALIDATION PENDING | All three templates parse and local Ref/GetAtt references resolve; SAM CLI/cfn-lint are unavailable in this environment. See [production readiness](docs/production-deployment-readiness.md). |
-| Production AWS data plane | PRE-DEPLOYMENT REVIEW — NOT DEPLOYED | Three SAM templates received offline YAML/reference review; formal SAM/cfn-lint validation is pending. Cognito pool/client/resource-server configuration and trigger association remain incomplete; deployment requires explicit billing approval. See [production readiness](docs/production-deployment-readiness.md). |
+| Infrastructure template review | OFFLINE STRUCTURAL REVIEW RECORDED — FORMAL SCHEMA VALIDATION PENDING | Prior offline YAML/reference checks are documented; this cycle did not run SAM CLI, cfn-lint, or packaging. See [production readiness](docs/production-deployment-readiness.md). |
+| Production AWS data plane | NO-GO — NOT DEPLOYED; TARGET REGION SELECTED | `ap-southeast-2` (Sydney) is the selected target. Cognito pool/client/resource-server configuration, trusted-attribute write controls, formal SAM validation, and account/cost approval remain pending. See [production readiness](docs/production-deployment-readiness.md). |
 | Adversarial benchmark | HOSTED BENCHMARK PENDING — 3-CASE CONTRACT SMOKE ONLY | Stubbed three-round run: attack success 0/2, defensive effectiveness 2/2, false denials 0/1, and policy decision accuracy 3/3. These are harness contract results, not hosted-model quality metrics. The eight-scenario hosted evaluation remains pending. |
 | GitHub Actions workflow | REMOVED | No unattended runner workflow remains in the repository |
 | Self-hosted runner | REMOVED FROM DESIGN | No runner is used for assistant-led interactive coding |
 | Assistant-led coding | INTERACTIVE ONLY | Work is performed in the active ChatGPT session; no reusable ChatGPT session endpoint or background execution is available |
-| Production deployment | BLOCKED — APPROVAL + VALIDATION + IDENTITY CONFIGURATION PENDING | No AWS resources created; formal SAM validation, Cognito foundation, staged integration and independent audit demo remain outstanding. |
+| Security review | SOURCE-LEVEL REVIEW COMPLETE — OVERALL VERDICT PARTIAL | Seven findings documented, including one conditional High deployment blocker. No dynamic tests, SAST/DAST, dependency scan, or live AWS verification were run. See [security review](docs/security-review-2026-11-21.md). |
+| Production deployment | BLOCKED — SECURITY + APPROVAL + VALIDATION + IDENTITY CONFIGURATION PENDING | No AWS resources created. Close the Cognito trusted-attribute control, resolve application findings, authorize verification, validate SAM, then run the staged synthetic evidence demo in `ap-southeast-2`. See [production readiness](docs/production-deployment-readiness.md). |
 
 Only move a row to COMPLETE after adding a commit, test result, deployed resource identifier, or other inspectable evidence. Update this table after every engineering cycle.
 
