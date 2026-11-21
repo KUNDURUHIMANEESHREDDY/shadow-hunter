@@ -9,7 +9,7 @@
 
 ## Go / no-go
 
-**NO-GO for production deployment at this point.** The templates are structurally coherent, but formal SAM/CloudFormation lint validation has not completed and the Cognito foundation is not fully represented as infrastructure-as-code.
+**NO-GO for production deployment at this point.** All four current templates pass standalone CloudFormation lint and SAM packaging; three pass SAM lint validation and the new identity stack passes SAM basic validation. The security-review findings and live Cognito/AgentCore/data-plane verification remain release gates.
 
 The user-approved boundary for this cycle is template review and preparation only. Do not create stacks, user pools, app clients, buckets, tables, queues, Lambda functions, API Gateway APIs, AgentCore Harnesses, Gateways, credential providers, model invocations, or paid resources until the owner gives explicit AWS deployment approval.
 
@@ -30,11 +30,7 @@ used by this architecture. Regional availability does not establish account
 entitlement, service quotas, model availability, Cognito token-exchange
 configuration, or pricing; those remain Stage 0 checks.
 
-The release gate is still **NO-GO**. The documentation/source review did not
-run tests, SAST/DAST, browser checks, SAM validation, cfn-lint, packaging, or
-AWS integration. The current docs/engineering-cycle.md explicitly blocks
-verification commands until the owner authorizes a policy change. No AWS
-resources or credentials were accessed.
+The earlier source-review cycle did not run tests, SAST/DAST, browser checks, SAM validation, cfn-lint, packaging, or AWS integration. The production-only offline implementation and its later verification are recorded below. Those checks do not close the security findings or prove live AWS behavior; the release gate remains **NO-GO**. No AWS resources or credentials were accessed.
 
 ## Security blockers to close before customer-facing deployment
 
@@ -80,11 +76,11 @@ The template-relative code locations correspond to the checked-in handlers and d
 - Data stack: `../../src/shadow_hunter/`, handler `audit_exporter.handler`, nested `src/shadow_hunter/requirements.txt`.
 - Application stack: `../../src/`, handler `shadow_hunter.lambda_handler.handler`, `src/requirements.txt`.
 
-This was a source-tree review only; SAM packaging has not been built.
+The initial package-path review was source-only. Subsequent local SAM builds passed for all four templates; this does not prove service-side deployment behavior.
 
-### Static structural validation
+### Earlier baseline structural validation (superseded by current verification below)
 
-An offline YAML parser with CloudFormation intrinsic-tag handling parsed all three templates and checked their local `Ref` and `GetAtt` resource references:
+At the earlier review baseline, an offline YAML parser with CloudFormation intrinsic-tag handling parsed the three templates then present and checked their local `Ref` and `GetAtt` resource references:
 
 | Template | YAML parse | Internal reference check |
 |---|---:|---:|
@@ -92,9 +88,9 @@ An offline YAML parser with CloudFormation intrinsic-tag handling parsed all thr
 | Data | Pass | Pass |
 | Application | Pass | Pass |
 
-This is **not** formal CloudFormation schema validation. The current environment does not have SAM CLI or `cfn-lint`; the attempt to obtain the missing validator was blocked by unavailable network access. Consequently, the SAM transform, resource-property schemas, service-side constraints, and package resolution remain unverified.
+This historical check was **not** formal CloudFormation schema validation. SAM CLI and `cfn-lint` were unavailable during that earlier review. The current four-template validation and package results are recorded in the production-only offline implementation update below.
 
-When SAM CLI and cfn-lint are available, run these non-deploying validation commands from the repository root:
+The following were the earlier three-template validation commands. Current four-template validation has since been completed locally, as recorded below:
 
 ```powershell
 sam validate --lint --template-file infra/cognito/pre-token-generation.yaml
@@ -102,21 +98,22 @@ sam validate --lint --template-file infra/data/dynamodb.yaml
 sam validate --lint --template-file infra/app/template.yaml
 ```
 
-Do not treat a successful YAML parse or local reference check as a substitute for these commands. A separate SAM build/package review is also still required before deployment and should be performed only within the separately approved validation scope.
+A successful local validation or package build is not proof of AWS service acceptance or production operation. Live deployment remains a separate approval-gated activity.
 
 ## Findings that must be closed
 
-### 1. Cognito is only partially provisioned
+### 1. Cognito identity infrastructure and trusted attributes
 
-The current Cognito SAM template creates the pre-token-generation Lambda and a resource-based permission scoped to an existing User Pool. It does **not** create or configure:
+The earlier review baseline had only an existing-pool trigger add-on. This implementation adds infra/cognito/identity-stack.yaml for a new production User Pool, and retains infra/cognito/pre-token-generation.yaml as an add-on for an existing pool. The new identity stack defines:
 
-- the User Pool and its `custom:tenant_id` / `custom:customer_id` attributes;
-- customer, operator, and agent/M2M app clients;
-- the resource server, audience, scopes, operator group, or hosted sign-in domain;
-- OAuth token-exchange/delegation settings or the AgentCore Identity credential provider;
-- the User Pool's `LambdaConfig.PreTokenGenerationConfig` association.
+- the User Pool and immutable custom:tenant_id / custom:customer_id attributes;
+- separate customer, operator, and agent/M2M app clients with restricted attribute write permissions;
+- resource servers, audiences, scopes, operator group, and hosted sign-in domain;
+- the V3_0 pre-token trigger association and Cognito-to-Lambda invoke permission.
 
-The Cognito README currently describes the trigger association as a manual console step. This must be completed deliberately or replaced with an approved User Pool template before Cognito can be called fully reproducible from infrastructure-as-code.
+The AgentCore OBO provider is documented with an external Secrets Manager reference, but its live provider/Gateway configuration is not deployed. Cognito token-exchange account entitlement and real issued token claims remain unverified.
+
+For a new pool, the identity stack associates the V3_0 trigger. For an existing pool, the add-on still requires deliberate trigger association. The customer app client cannot write the immutable tenant/customer attributes; actual deployed pool configuration and administrative provisioning controls still require live evidence.
 
 For this workload, configure the trigger as **V3_0**. V3 supports M2M ClientCredentials access-token customization, which is required for the actor-token flow; the Lambda intentionally passes ClientCredentials actor events through unchanged. The AgentCore guide was aligned to this version in this cycle. Confirm the User Pool feature plan and account-level token-exchange enablement before attempting OBO configuration. Cognito token exchange requires the applicable Essentials/Plus feature tier and its issued scopes remain constrained by the subject token and exchange client's allowed scopes. <https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-lambda-pre-token-generation.html> <https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-token-exchange.html>
 

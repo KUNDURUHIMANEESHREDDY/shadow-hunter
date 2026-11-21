@@ -185,7 +185,7 @@ ChatGPT task automations currently support daily, weekly, and monthly recurring 
 | GitHub Actions workflow | REMOVED | No unattended runner workflow remains in the repository |
 | Self-hosted runner | REMOVED FROM DESIGN | No runner is used for assistant-led interactive coding |
 | Assistant-led coding | INTERACTIVE ONLY | Work is performed in the active ChatGPT session; no reusable ChatGPT session endpoint or background execution is available |
-| Security review | SOURCE-LEVEL REVIEW COMPLETE — OVERALL VERDICT PARTIAL | Seven findings documented, including one conditional High deployment blocker. No dynamic tests, SAST/DAST, dependency scan, or live AWS verification were run. See [security review](docs/security-review-2026-11-21.md). |
+| Security review | SOURCE-LEVEL REVIEW COMPLETE - OVERALL VERDICT PARTIAL | Seven findings documented, including one conditional High deployment blocker. Bandit and Semgrep passed on the changed authentication modules; DAST, browser, dependency and live AWS verification remain outstanding. See security review. |
 | Production deployment | NO-GO - SECURITY + LIVE SERVICE VERIFICATION PENDING | Production-only infrastructure is implemented locally. No AWS account or cloud resources were used. Close the security-review findings and obtain separate approval before any deployment. |
 
 Only move a row to COMPLETE after adding a commit, test result, deployed resource identifier, or other inspectable evidence. Update this table after every engineering cycle.
