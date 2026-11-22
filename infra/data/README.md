@@ -217,14 +217,14 @@ operations use point reads, indexed queries, puts, updates, and transactions.
 
 ## Boundaries
 
-- The adapter now has offline transaction-level integration coverage through Moto (see `tests/test_dynamodb_integration.py`) for refunds, maker-checker, idempotency, nonce replay guards, quota reservations and audit queries. This proves behavior against the emulator, not deployed AWS. The deployed adapter is still unverified.
+- The adapter has Moto offline transaction-level integration coverage (`tests/test_dynamodb_integration.py`) and a **live, synthetic staging** AWS transaction smoke test (`scripts/smoke_aws_data.py`). Staging verified approval, demo refund execution and idempotent replay. Production use and real payment processing remain unverified.
 - It updates an AWS-hosted demo refund ledger. It does not call a payment
   processor, bank, or external refund API.
 - DynamoDB audit rows remain append-oriented; the separate S3 Object Lock archive
   is a retention copy, with configurable Governance/Compliance behavior.
-- The stream/exporter/archive stack is authored but untested and undeployed.
+- The stream/exporter/archive stack has been deployed in **staging**, with three correlated audit events exported to S3 and verified by object existence. Full reconciliation, independent archive content verification and production deployment remain pending.
 - Historical DynamoDB rows created before stream enablement are not backfilled.
-- The production table and archive are not provisioned by this repository change.
+- The production table and archive are **not** provisioned. See `docs/cycles/2026-11-22-aws-staging-deployment.md` for staging stack names, live test evidence, cost caveats and release gates.
 
 
 

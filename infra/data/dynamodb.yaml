@@ -6,8 +6,8 @@ Parameters:
   Environment:
     Type: String
     Default: production
-    AllowedValues: [production]
-    Description: Production table name; deletion protection is always enabled.
+    AllowedValues: [production, staging]
+    Description: Namespaced table and audit archive; deletion protection is always enabled.
   AuditRetentionDays:
     Type: Number
     Default: 365

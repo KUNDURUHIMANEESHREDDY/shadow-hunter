@@ -31,3 +31,10 @@ Thumbs.db
 *.sqlite3
 *.sqlite3-*
 infra/agentcore/**/harness.yaml
+
+# Generated staging-only SAM overlays; regenerate with scripts/prepare_staging_aws.py.
+infra/cognito/identity-stack.staging-generated.yaml
+infra/app/template.staging-generated.yaml
+
+# SAM build outputs and packaged Lambda artifacts.
+.aws-sam/

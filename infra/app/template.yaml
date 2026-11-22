@@ -155,6 +155,7 @@ Resources:
       Environment:
         Variables:
           SHADOW_HUNTER_AUTH_MODE: cognito
+          SHADOW_HUNTER_API_BASE_PATH: /prod
           SHADOW_HUNTER_STORE_BACKEND: dynamodb
           SHADOW_HUNTER_DYNAMODB_TABLE: !Ref DynamoDBTableName
           SHADOW_HUNTER_COGNITO_ISSUER: !Ref CognitoIssuer
