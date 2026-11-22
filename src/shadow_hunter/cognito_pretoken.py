@@ -10,7 +10,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-
 _SUPPORTED_VERSIONS = {"3"}
 _M2M_TRIGGER = "TokenGeneration_ClientCredentials"
 _OPERATOR_GROUP = "shadow_hunter_operators"

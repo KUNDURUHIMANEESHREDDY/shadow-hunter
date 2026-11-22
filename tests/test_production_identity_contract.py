@@ -10,7 +10,6 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from shadow_hunter.auth import CognitoJWTAuthenticator
 from shadow_hunter.cognito_pretoken import handler as cognito_pretoken_handler
 
-
 ISSUER = "https://cognito-idp.local.invalid/us-east-1_shadowhunter"
 CUSTOMER_CLIENT_ID = "synthetic-customer-client"
 OPERATOR_CLIENT_ID = "synthetic-operator-client"

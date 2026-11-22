@@ -161,7 +161,7 @@ Add a global provider budget, cross-operator aggregate cap, usage alerts, and op
 
 **Evidence**
 
-The original trigger-only template did not define the pool or app clients. The follow-up infra/cognito/identity-stack.yaml now defines a production User Pool with immutable tenant_id/customer_id schema attributes, administrative-only user creation, a customer app client whose WriteAttributes exclude those attributes, separate operator and M2M clients, an operator group/MFA posture, and a V3_0 trigger. These are source-level controls only; no deployed pool, live app-client configuration, or issued token was inspected.
+The original trigger-only template did not define the pool or app clients. The follow-up infra/cognito/identity-stack.yaml now defines a production User Pool with immutable tenant_id/customer_id schema attributes, administrative-only user creation, customer and operator app clients with explicit email-only WriteAttributes, separate operator and M2M clients, an operator group/MFA posture, and a V3_0 trigger. Offline contract tests assert the pool schema, human-client read/write allowlists, operator/M2M separation, trigger association, and the limited scope of the existing-pool add-on. A pre-token regression also proves pre-existing tenant/customer claim overrides cannot replace values from trusted user-pool attributes. These are source-level controls only; no deployed pool, live app-client configuration, or issued token was inspected.
 
 **Impact and precondition**
 
@@ -195,7 +195,7 @@ These source observations are positive design controls, not proof that the deplo
 | SH-SEC-004 | **Remediated locally; edge verification pending** | HTTP response-header tests and Edge iframe CSP check pass. Verify deployed API Gateway response headers. |
 | SH-SEC-005 | **Remediated locally** | AgentCore failure injection confirms the HTTP 502 does not reflect arbitrary provider error text and includes a trace ID. |
 | SH-SEC-006 | **Partially mitigated** | Per-operator daily limit, cooldown and kill switch are covered by SQLite/DynamoDB tests. Add global spend cap, aggregate quota and alerts. |
-| SH-SEC-007 | **IaC controls authored; live deployment proof open** | Identity stack defines immutable trusted attributes, restricted customer WriteAttributes, separate operator/M2M clients, MFA/group and V3_0 trigger. Inspect deployed pool, provisioning controls and issued tokens in staging. |
+| SH-SEC-007 | **IaC controls and offline contract tests committed; live deployment proof open** | 39 focused Cognito template/auth/pre-token tests passed in the local cycle. Identity stack defines immutable trusted attributes and explicit email-only human-client write allowlists; a regression protects trusted claims from pre-existing overrides. Inspect deployed pool, every client/IdP mapping, provisioning controls and issued tokens in staging. |
 
 ## Verification limitations
 
@@ -203,6 +203,7 @@ These source observations are positive design controls, not proof that the deplo
 |---|---|
 | Full Python regression/integration suite on merged main | **177 passed** (isolated Python 3.11 environment with dev/server/aws extras) |
 | Focused approval/API/DynamoDB/gateway security tests | **37 passed**; includes maker-checker, token recovery/rotation, evaluation quota and public resource-denial behavior |
+| Focused Cognito identity contract tests (local SH-SEC-007 cycle) | **39 passed**; offline template, authenticator and pre-token handler contracts; no live Cognito calls |
 | Browser security | Microsoft Edge headless check passed for operator page response headers and iframe blocking; full recovery UI E2E and deployed edge behavior remain pending |
 | Semgrep source/security/secrets | **0 findings**; 122 rules across 22 tracked source files on the merged tree |
 | pip-audit | **No known vulnerabilities found** in src/requirements.txt |

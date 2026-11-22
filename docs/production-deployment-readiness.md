@@ -232,8 +232,9 @@ Subsequent non-deploying infrastructure validation and local regression evidence
 - Security findings and release-test matrix: [security-review-2026-11-21.md](security-review-2026-11-21.md).
 - Original source-review cycle: [2026-11-20-local-release-candidate-security-review.md](cycles/2026-11-20-local-release-candidate-security-review.md).
 - Remediation cycle: [2026-11-20-release-candidate-remediation.md](cycles/2026-11-20-release-candidate-remediation.md).
+- SH-SEC-007 offline Cognito identity contract cycle: [2026-11-20-security-remediation-sh-sec-007.md](cycles/2026-11-20-security-remediation-sh-sec-007.md).
 - Selected Region: ap-southeast-2 (Sydney).
-- Merged-main Python suite: **177 passed**; focused approval/API/DynamoDB/gateway group: **37 passed**.
+- Merged-main Python suite: **177 passed**; focused approval/API/DynamoDB/gateway group: **37 passed**. The subsequent local SH-SEC-007 cycle added **39 focused Cognito template/auth/pre-token tests**; these are offline contracts, not live-pool verification.
 - Browser: Edge headless response-header and iframe-blocking check passed; complete reload/recovery/execution UI E2E remains pending.
 - Infrastructure: cfn-lint passed all four templates; sam validate --lint passed existing-pool Cognito trigger, data and API; basic SAM validation passed the new identity stack. The prior WSL2 cycle record reports sam build --no-use-container passed all four templates.
 - Merged-main Semgrep: 0 findings across 22 tracked files / 122 rules; pip-audit: no known vulnerabilities; Bandit: 0 High / 0 Medium / 10 Low. DAST and penetration testing were not performed.

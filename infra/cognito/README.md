@@ -30,7 +30,7 @@ The customer and operator clients are public authorization-code clients without 
 
 ## Trusted user provisioning
 
-The User Pool defines immutable tenant/customer attributes. The browser clients cannot write them. A trusted administrative provisioning process must assign custom:tenant_id and custom:customer_id for each customer before token issuance. The pre-token trigger fails customer and delegated-user token issuance if either trusted attribute is absent or malformed.
+The User Pool defines immutable tenant/customer attributes. Both human app clients explicitly set `WriteAttributes: [email]` and read only `email` / `email_verified`; they cannot write or retrieve `custom:tenant_id` or `custom:customer_id`. Do not omit `WriteAttributes`: Cognito's default permissions can be broader than intended. A trusted administrative provisioning process must set both immutable custom attributes at user creation, before token issuance. Cognito does not let you change an immutable custom attribute after creation, so provisioning must validate tenant/customer assignments before creating the user. The pre-token trigger fails customer and delegated-user token issuance if either trusted attribute is absent or malformed.
 
 Operator users are a separate identity class. Cognito's V3 pre-token event includes server-managed group information. A member of shadow_hunter_operators passes through unchanged: the trigger never adds customer tenant/customer claims to operator tokens, even when those attributes exist. The API independently requires the separate operator app-client ID and operator group claim. Ordinary users without both tenant/customer attributes are rejected.
 
@@ -56,11 +56,11 @@ Cognito token exchange is account-level functionality. The account must enable i
 
 ## Offline verification
 
-The repository includes a local synthetic identity contract test. It generates ephemeral RSA keys, signs synthetic Cognito-shaped access tokens, invokes the real pre-token handler, and verifies the real CognitoJWTAuthenticator for customer, operator, and delegated-agent profiles. It also tests wrong actor, wrong audience, missing tenant attributes, and separate operator-client enforcement.
+The repository includes local synthetic identity contract tests and a CloudFormation template contract test. The identity tests generate ephemeral RSA keys, sign synthetic Cognito-shaped access tokens, invoke the real pre-token handler, and verify the real CognitoJWTAuthenticator for customer, operator, and delegated-agent profiles. They also test wrong actor, wrong audience, missing tenant attributes, separate operator-client enforcement, and that pre-existing claim overrides cannot replace the trusted user-pool attributes. The template contract test parses the new-pool and existing-pool templates and verifies immutable attributes, explicit human-client write allowlists, admin-only creation, MFA, V3_0 trigger association, and the limited scope of the existing-pool add-on.
 
 Run locally:
 
-    python -m pytest tests/test_auth.py tests/test_cognito_pretoken.py tests/test_production_identity_contract.py -q
+    python -m pytest tests/test_cognito_identity_template.py tests/test_auth.py tests/test_cognito_pretoken.py tests/test_production_identity_contract.py -q
 
 These tests do not contact Cognito, use a real User Pool, or prove that AWS issued the synthetic tokens. They are offline contract tests only.
 
@@ -76,11 +76,11 @@ Validate and package the production templates locally:
     sam build --template-file infra/data/dynamodb.yaml
     sam build --template-file infra/app/template.yaml
 
-Use a current standalone cfn-lint release for the identity template: the cfn-lint schema bundled with older SAM CLI distributions may not recognize the newer ALLOW_TOKEN_EXCHANGE_DELEGATION enum.
+Use a current standalone cfn-lint release for the identity template. In this local environment, `sam validate --lint --template-file infra/cognito/identity-stack.yaml` returned E3030 because the lint schema bundled with SAM CLI 1.174.0 does not list `ALLOW_TOKEN_EXCHANGE_DELEGATION`. Basic `sam validate` and `sam build` passed for the identity stack. The current AWS CloudFormation `AWS::Cognito::UserPoolClient` reference lists `ALLOW_TOKEN_EXCHANGE_DELEGATION` as a valid `ExplicitAuthFlows` value; treat this as a stale bundled-linter schema finding until a current standalone cfn-lint run is available, not as a reason to remove the delegated-token flow.
 
 ## Existing User Pool
 
-infra/cognito/pre-token-generation.yaml is an add-on for an already provisioned production User Pool. It only deploys the trigger Lambda and its invoke permission. It does not configure the User Pool's clients, scopes, email, domain, or LambdaConfig. Do not mix the new-pool and existing-pool paths.
+infra/cognito/pre-token-generation.yaml is an add-on for an already provisioned production User Pool. It only deploys the trigger Lambda and its invoke permission. It does not configure or validate the User Pool schema, app clients, `ReadAttributes` / `WriteAttributes`, sign-up policy, operator group, MFA, email, domain, or LambdaConfig. **This add-on does not remediate the trusted-attribute finding by itself.** Before using it, inspect every app client in the existing pool and prove that none can write `custom:tenant_id` or `custom:customer_id`; inspect all IdP attribute mappings and self-service flows; verify the pool's attribute mutability, operator group provisioning, MFA and V3_0 trigger association. If any app client can write a trusted attribute, or the account configuration cannot be inspected, do not expose the customer API. Custom attribute mutability is fixed when the schema is created; when an existing pool has the wrong schema, create a separately reviewed pool rather than assuming this add-on can correct it. Do not mix the new-pool and existing-pool paths.
 
 ## Offline implementation status
 
@@ -94,3 +94,11 @@ The identity stack and AgentCore examples are infrastructure code only. The temp
 - Cognito User Pool Client: https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-cognito-userpoolclient.html
 - Amazon Cognito SES email configuration: https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-email.html
 - AgentCore OBO token exchange: https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/on-behalf-of-token-exchange.html
+
+## Security references
+
+- Cognito user-pool attributes and immutable custom attributes: https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-settings-attributes.html
+- CloudFormation UserPoolClient ReadAttributes / WriteAttributes contract: https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-cognito-userpoolclient.html
+- Cognito pre-token-generation trigger versions and access-token customization: https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-lambda-pre-token-generation.html
+
+The identity stack is a source-level mitigation for a newly provisioned pool. It is not evidence that an account has deployed these settings or that an existing pool has the same boundary. Production remains blocked until deployed configuration and real issued tokens are inspected.

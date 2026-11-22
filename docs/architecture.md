@@ -231,14 +231,19 @@ kept in page memory; they are not shared across page contexts.
 ### Identity and authorization assumptions
 
 - Cognito's pre-token function copies custom:tenant_id and custom:customer_id
-  into access-token claims. These attributes are trusted authorization inputs
-  and must be writable only by a controlled provisioning process. Customer
-  app-client write permissions and self-service profile updates must not allow
-  users to change either attribute.
+  into access-token claims. The new-pool identity stack makes both custom
+  attributes immutable and explicitly limits both human clients to
+  `WriteAttributes: [email]`; a trusted administrator must set their values
+  during user creation. The existing-pool trigger add-on does not enforce
+  these settings. For any existing pool, inspect every app client and IdP
+  mapping; no client or self-service path may write either trusted attribute.
 - A separate operator app client and operator group are required for the
-  deployed API. The actual user pool, client write permissions, MFA policy,
-  group membership, resource server, token exchange, and V3_0 trigger
-  association are not provisioned by the checked-in Cognito template.
+  deployed API. The new-pool identity stack provisions the pool, app clients,
+  resource servers, empty operator group, MFA posture, and V3_0 trigger
+  association. Actual deployed values, operator membership, account-level
+  token-exchange enablement, IdP mappings, and issued token claims remain
+  unverified. The existing-pool trigger add-on does not provision or validate
+  any of those User Pool controls.
 - The model never supplies the principal. The authenticated route or MCP
   boundary creates it; the gateway retrieves order facts from trusted storage;
   the deterministic policy makes the decision.
@@ -260,8 +265,10 @@ approver. Local regression tests pass; live DynamoDB staging verification
 remains pending. Remaining source-level blockers include an approval-token
 recovery gap after page refresh, missing operator-console framing protections,
 upstream AgentCore error reflection, and no per-operator hosted-inference
-budget. The Cognito trusted-attribute write boundary remains a conditional
-High deployment blocker.
+budget. The Cognito trusted-attribute boundary has new-pool IaC controls
+and offline contract tests, but remains a conditional High deployment blocker
+until the deployed pool, all clients/IdP mappings, and real issued tokens are
+verified.
 Findings and required evidence are tracked in
 [the 2026-11-20 security review](security-review-2026-11-21.md).
 
@@ -272,14 +279,19 @@ Findings and required evidence are tracked in
   operator API, MCP adapter, hosted Red/Blue evaluator, and audit archive
   components.
 - Current local verification: SH-SEC-001 HTTP/MCP/gateway regressions passed;
-  SH-SEC-002 approval/DynamoDB/gateway regressions passed; the Python suite
-  passed with the Lambda-entrypoint test excluded because optional `mangum`
-  is absent; compilation, repository metadata validation, and diff validation
-  passed. Ruff F/I checks and E/F/I checks excluding existing E501
-  line-length diagnostics passed. Full-file Ruff still reports pre-existing
-  style diagnostics in touched modules; no unrelated lint cleanup was included.
+  SH-SEC-002 approval/DynamoDB/gateway regressions passed; SH-SEC-007 Cognito
+  template/auth/pre-token regressions passed (39 focused tests). The broader
+  Python suite passed 167 tests with the Lambda-entrypoint test excluded
+  because optional `mangum` is absent. Cognito templates passed SAM basic
+  validation and both SAM builds. Python compilation, repository metadata
+  validation, Ruff F/I checks, and diff validation passed.
+- SAM `validate --lint` for the new identity template reports E3030 for
+  `ALLOW_TOKEN_EXCHANGE_DELEGATION`; the bundled lint schema does not yet list
+  this value, although current AWS CloudFormation and Cognito API references
+  do. No standalone current cfn-lint executable was available to cross-check
+  this schema mismatch. Do not treat the lint pass as complete.
 - Not verified in this cycle: SAST/DAST, dependency scans, browser behavior,
-  SAM transform validation, package build, AWS IAM/user-pool configuration,
+  deployed AWS IAM/User Pool configuration, actual Cognito-issued tokens,
   deployed storage, AgentCore OBO exchange, and end-to-end audit archive
   evidence.
 - Not deployed: Cognito, DynamoDB, S3 Object Lock archive, SQS DLQ, Lambda,

@@ -94,6 +94,30 @@ def test_existing_access_token_claim_overrides_are_preserved():
     assert access["scopesToSuppress"] == ["unwanted-scope"]
 
 
+def test_trusted_user_pool_attributes_override_preexisting_identity_claims():
+    event = cognito_event()
+    event["response"]["claimsAndScopeOverrideDetails"] = {
+        "accessTokenGeneration": {
+            "claimsToAddOrOverride": {
+                "tenant_id": "attacker-tenant",
+                "customer_id": "attacker-customer",
+                "other_claim": "preserved",
+            }
+        }
+    }
+
+    result = handler(event, None)
+    claims = result["response"]["claimsAndScopeOverrideDetails"][
+        "accessTokenGeneration"
+    ]["claimsToAddOrOverride"]
+
+    assert claims == {
+        "tenant_id": "tenant-001",
+        "customer_id": "customer-001",
+        "other_claim": "preserved",
+    }
+
+
 @pytest.mark.parametrize(
     "attributes",
     [
