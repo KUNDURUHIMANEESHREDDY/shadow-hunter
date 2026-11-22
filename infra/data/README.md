@@ -194,7 +194,12 @@ After deployment, configure:
 
 For local demos, leave the backend as sqlite. An optional
 SHADOW_HUNTER_DYNAMODB_ENDPOINT supports DynamoDB Local or a local test
-service.
+service. For isolated integration tests with no AWS account access, install
+`python -m pip install -e ".[aws,dev]"` and run
+`python -m pytest -q tests/test_dynamodb_integration.py`.
+Moto intercepts AWS calls and creates an ephemeral in-memory table with PK/SK
+and GSI1. It exercises the real Boto3 low-level transaction client without
+deploying any cloud resources or contacting AWS.
 
 ## Application IAM permissions
 
@@ -212,7 +217,7 @@ operations use point reads, indexed queries, puts, updates, and transactions.
 
 ## Boundaries
 
-- The adapter is implemented but untested and not deployed.
+- The adapter now has offline transaction-level integration coverage through Moto (see `tests/test_dynamodb_integration.py`) for refunds, maker-checker, idempotency, nonce replay guards, quota reservations and audit queries. This proves behavior against the emulator, not deployed AWS. The deployed adapter is still unverified.
 - It updates an AWS-hosted demo refund ledger. It does not call a payment
   processor, bank, or external refund API.
 - DynamoDB audit rows remain append-oriented; the separate S3 Object Lock archive

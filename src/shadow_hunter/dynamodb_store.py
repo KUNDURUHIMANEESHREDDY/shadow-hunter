@@ -59,7 +59,22 @@ class DynamoDBStore:
             )
             table = self._resource.Table(table_name)
         self._table = table
-        self._client = client or table.meta.client
+        if client is None:
+            # Table.meta.client belongs to the high-level DynamoDB resource.
+            # Its parameter transformer wraps transaction Item/Key values a
+            # second time, corrupting already TypeSerializer-encoded requests.
+            # Use a separately constructed low-level client for transactions.
+            import boto3
+
+            client = boto3.client(
+                "dynamodb",
+                region_name=region or table.meta.client.meta.region_name,
+                endpoint_url=endpoint_url or (
+                    table.meta.client.meta.endpoint_url
+                    if self._resource is None else None
+                ),
+            )
+        self._client = client
 
     @classmethod
     def from_environment(cls) -> "DynamoDBStore":
