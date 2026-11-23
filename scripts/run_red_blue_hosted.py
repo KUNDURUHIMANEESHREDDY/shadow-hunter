@@ -12,6 +12,7 @@ No AWS, payments, external customer data, or real customer orders are used.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import secrets
@@ -33,7 +34,13 @@ from shadow_hunter.nim import (
 )
 from shadow_hunter.policy import PolicyConfig, PolicyEngine, Principal
 from shadow_hunter.store import SQLiteStore
-from scripts.run_red_blue_synthetic import canonical_hash
+
+
+
+def canonical_hash(data: object) -> str:
+    return hashlib.sha256(
+        json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    ).hexdigest()
 
 
 def evaluate_hosted(client: Any, *, rounds: int = 1) -> dict:
