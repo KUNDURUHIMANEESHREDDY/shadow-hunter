@@ -45,7 +45,6 @@ class FakeCognito:
     def __init__(self):
         self.pool = {
             "MfaConfiguration": "ON",
-            "EnabledMfas": ["SOFTWARE_TOKEN_MFA"],
             "DeletionProtection": "ACTIVE",
             "LambdaConfig": {"PreTokenGenerationConfig": {"LambdaVersion": "V3_0"}},
         }
@@ -53,6 +52,10 @@ class FakeCognito:
             "ExplicitAuthFlows": ["ALLOW_USER_SRP_AUTH"],
             "AllowedOAuthFlows": ["code"],
             "WriteAttributes": ["email"],
+        }
+        self.mfa = {
+            "MfaConfiguration": "ON",
+            "SoftwareTokenMfaConfiguration": {"Enabled": True},
         }
         self.clients = {
             "cust-123": copy.deepcopy(public),
@@ -69,6 +72,9 @@ class FakeCognito:
     def describe_user_pool(self, *, UserPoolId):
         return {"UserPool": self.pool}
 
+    def get_user_pool_mfa_config(self, *, UserPoolId):
+        return self.mfa
+
     def describe_user_pool_client(self, *, UserPoolId, ClientId):
         return {"UserPoolClient": self.clients[ClientId]}
 
@@ -83,7 +89,9 @@ def test_totp_matches_rfc_6238_sha1_vector():
 
 def test_read_only_live_pool_contract_passes():
     outputs = _stack_outputs(FakeCloudFormation(), "shadow-hunter-identity-staging")
-    agent = _inspect_identity(FakeCognito(), outputs, "ap-southeast-2")
+    idp = FakeCognito()
+    assert "EnabledMfas" not in idp.pool  # AWS may omit this field.
+    agent = _inspect_identity(idp, outputs, "ap-southeast-2")
     assert "ClientSecret" in agent
 
 
@@ -96,7 +104,9 @@ def test_non_staging_and_noncomplete_stacks_rejected():
 
 @pytest.mark.parametrize("mutation", [
     lambda idp: idp.pool.update(MfaConfiguration="OFF"),
-    lambda idp: idp.pool["EnabledMfas"].clear(),
+    lambda idp: idp.mfa["SoftwareTokenMfaConfiguration"].update(Enabled=False),
+    lambda idp: idp.mfa.pop("SoftwareTokenMfaConfiguration"),
+    lambda idp: idp.mfa.update(MfaConfiguration="OFF"),
     lambda idp: idp.pool["LambdaConfig"]["PreTokenGenerationConfig"].update(LambdaVersion="V2_0"),
     lambda idp: idp.clients["cust-123"].update(WriteAttributes=["email", "custom:tenant_id"]),
     lambda idp: idp.clients["operator-123"].update(AllowedOAuthFlows=["implicit"]),
