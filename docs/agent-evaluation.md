@@ -336,3 +336,19 @@ contract without external requests. Those tests alone do **not** prove a
 live NVIDIA connection, nor a hosted security-performance advantage.
 A successful explicit hosted run and evaluation of its metrics is necessary
 before claiming model-assisted Red/Blue validation.
+
+
+### Manual GitHub-hosted NIM smoke
+
+For laptop-independent verification, the repository includes
+`.github/workflows/red-blue-hosted-smoke.yml`, a **manual-only** GitHub Actions
+workflow. Set the repository Actions secret `NVIDIA_API_KEY` through GitHub
+Settings (never paste it into a workflow input, commit, issue or chat).
+Then go to Actions → **Hosted Red-Blue model smoke (manual only)** →
+**Run workflow**. Explicitly confirm provider calls and select 1–3 rounds.
+
+The job is skipped without confirmation, checks for a configured NVIDIA
+secret before sending any request, uses only synthetic local orders, and
+uploads a short-lived redacted report. It does not run on pushes or PRs.
+Provider usage may incur charges. No manual hosted workflow has been invoked
+as part of the normal development CI.
