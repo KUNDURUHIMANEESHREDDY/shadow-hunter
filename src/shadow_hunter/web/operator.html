@@ -234,14 +234,19 @@
   };
   const base64Url = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
   async function api(path, options={}) {
+    const requestToken = operatorToken;
     const response = await fetch(apiUrl(path), {...options, headers: {...headers(), ...(options.headers || {})}});
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
       if (response.status === 401) {
-        operatorToken = "";
-        clearSensitiveView();
-        $("logout").hidden = true;
-        $("cognito-login").hidden = !authConfig?.cognito?.login_available;
+        // A late 401 from a previous account must not sign out a new session.
+        if (operatorToken === requestToken) {
+          operatorToken = "";
+          clearSensitiveView();
+          $("logout").hidden = true;
+          $("cognito-login").hidden = !authConfig?.cognito?.login_available;
+          setMessage("Operator session expired or invalid. Sign in again.", true);
+        }
         throw new Error("Operator session expired or invalid. Sign in again.");
       }
       throw new Error(typeof payload.detail === "string" ? payload.detail : ("Request failed: " + response.status));
@@ -570,6 +575,7 @@
     const button = $("run-agent-evaluation");
     if (!operatorToken) { setMessage("Sign in before running the evaluation.", true); return; }
     const generation = loadGeneration;
+    const startedToken = operatorToken;
     button.disabled = true;
     button.textContent = "Running…";
     try {
@@ -579,7 +585,7 @@
       });
       if (generation !== loadGeneration || !operatorToken) return;
       await load();
-      if (!operatorToken) return;
+      if (!operatorToken || operatorToken !== startedToken) return;
       setMessage("Hosted NVIDIA NIM evaluation " + result.run_id.slice(0, 12) + "… completed: " +
         result.attacks_prevented + "/" + result.attack_attempts +
         " attacks prevented; success rate " + percent(result.attack_success_rate) + ".");
