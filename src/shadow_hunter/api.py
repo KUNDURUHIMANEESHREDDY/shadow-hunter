@@ -114,6 +114,12 @@ def create_app(
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
+        # Operator and agent responses can contain audit evidence or other
+        # account-scoped information. Do not let browsers/shared caches retain
+        # API data across sign-out, expired tokens, or account switches.
+        if request.url.path == "/operator" or request.url.path.startswith(("/operator/", "/v1/")):
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["Pragma"] = "no-cache"
         return response
 
     app.state.store = store
