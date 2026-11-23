@@ -1,5 +1,15 @@
 # Staging Cognito live-auth verification gate — 23 November 2026
 
+## Live staging follow-up (23 November 2026)
+
+- The AWS CLI session was successfully reauthenticated and verified using the real STS GetCallerIdentity API (staging role `AccountFullAccessRole`).
+- Cognito `DescribeUserPool` and `GetUserPoolMfaConfig` confirm `MfaConfiguration=ON`, software-token MFA enabled, Cognito Essentials, and V3_0 pre-token Lambda.
+- The original read-only smoke runner used a nonexistent `DescribeUserPool.EnabledMfas` field; corrected it to use `GetUserPoolMfaConfig.SoftwareTokenMfaConfiguration.Enabled`. The corrected read-only staging inspection passed for the pool, clients, and delegation configuration; the updated 12 targeted offline tests passed.
+- A subsequent `--mfa` live SRP attempt was **not successful**. The runner reported an unexpected `Error`; it did not establish successful MFA token issuance or an authenticated operator API request. Do not present this as an MFA pass.
+- The connected desktop tool reached its monthly usage cap before troubleshooting the SRP error or independently confirming disposable test-user cleanup. Check the staging pool for any remaining `sh-smoke-` accounts and remove any orphaned test accounts before another run.
+- The `--obo` derived-token path was not run because it requires a properly OAuth-scoped customer access token. AgentCore Gateway/Harness managed OBO remains a separate unverified gate.
+- No production AWS resources were modified during this follow-up.
+
 ## Current evidence and limits
 
 - The existing AWS staging identity, data and API stacks were deployed on 22 November.
