@@ -352,3 +352,21 @@ secret before sending any request, uses only synthetic local orders, and
 uploads a short-lived redacted report. It does not run on pushes or PRs.
 Provider usage may incur charges. No manual hosted workflow has been invoked
 as part of the normal development CI.
+
+
+### Hosted staging benchmark acceptance gate
+
+The separate authenticated staging benchmark,
+`scripts/benchmark_hosted_red_blue.py`, must now confirm that the
+`AGENT_EVALUATION_RUN` audit record reports the requested number of
+independently verified rounds, that each `AGENT_EVALUATION_RESULT` matches
+its API row, and that each row has a corresponding redacted
+`A2A_EVIDENCE_VERIFIED` receipt copied as
+`AGENT_EVALUATION_TRACE_EVENT`. Missing, forged, duplicated or mismatched
+SHA-256 receipts fail the benchmark instead of counting as a model success.
+
+Staging audit indexes may be eventually consistent, so the benchmark retries
+a still-incomplete trace up to three bounded times. It does not accept any
+partial result or relax verification when a retry expires. This is a
+**local-to-staging gateway audit consistency gate**, not a claim of an
+externally independent or immutable audit store.
