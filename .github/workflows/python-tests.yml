@@ -28,6 +28,20 @@ jobs:
         run: python -m pytest -q
       - name: Validate tracked repository files
         run: python scripts/validate-repo.py
+      - name: Run autonomous synthetic Red/Blue evaluation twice and verify reproducibility
+        run: |
+          mkdir -p artifacts
+          python scripts/run_red_blue_synthetic.py --rounds 8 --output artifacts/red-blue-evaluation.json
+          python scripts/run_red_blue_synthetic.py --rounds 8 --output artifacts/red-blue-evaluation-repeat.json
+          cmp artifacts/red-blue-evaluation.json artifacts/red-blue-evaluation-repeat.json
+      - name: Publish redacted reproducible security evidence
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shadow-hunter-red-blue-evidence
+          path: artifacts/red-blue-evaluation.json
+          if-no-files-found: error
+          retention-days: 14
 
 
   browser-e2e:
