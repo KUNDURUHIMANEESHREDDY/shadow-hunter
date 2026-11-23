@@ -1,0 +1,61 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Shadow Hunter conservative account-wide AWS staging cost notifications.
+  Notifications are informational and do not stop AWS charges.
+
+Parameters:
+  NotificationEmail:
+    Type: String
+    Description: Email address controlled by the staging account owner; verify the AWS confirmation email.
+    MinLength: 5
+    MaxLength: 254
+    AllowedPattern: '^[^@\s]+@[^@\s]+\.[^@\s]+$'
+    ConstraintDescription: Enter an actual email address for account cost alerts.
+  MonthlyBudgetUsd:
+    Type: Number
+    Description: Monthly account-wide budget amount in USD. This is NOT a spending cap.
+    Default: 10
+    MinValue: 1
+    MaxValue: 25
+
+Resources:
+  ShadowHunterStagingBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: !Sub 'shadow-hunter-staging-${AWS::AccountId}'
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref MonthlyBudgetUsd
+          Unit: USD
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 50
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref NotificationEmail
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 80
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref NotificationEmail
+        - Notification:
+            NotificationType: FORECASTED
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref NotificationEmail
+
+Outputs:
+  BudgetName:
+    Description: Expected account-wide staging budget name for the release preflight.
+    Value: !Sub 'shadow-hunter-staging-${AWS::AccountId}'

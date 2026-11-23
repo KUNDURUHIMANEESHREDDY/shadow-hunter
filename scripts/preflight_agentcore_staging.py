@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 
 REGION = "ap-southeast-2"
 STACKS = (
@@ -51,6 +52,105 @@ def check_cognito_config(pool: dict, customer: dict, operator: dict, agent: dict
     checks.require(bool(agent.get("ClientSecret")),
                    "agent OAuth client secret exists (value never disclosed)")
     return checks
+
+
+
+STAGING_BUDGET_PREFIX = "shadow-hunter-staging-"
+MAX_STAGING_BUDGET_USD = Decimal("25")
+
+
+def _budget_pages(call, result_key: str, *, kwargs: dict) -> list:
+    """Bound paginated AWS Budget lookups; never print subscriber identities."""
+    values: list = []
+    token = None
+    for _ in range(10):
+        parameters = dict(kwargs)
+        if token is not None:
+            parameters["NextToken"] = token
+        response = call(**parameters)
+        if not isinstance(response, dict):
+            raise ValueError("Invalid budget listing")
+        page = response.get(result_key) or []
+        if not isinstance(page, list):
+            raise ValueError("Invalid budget listing")
+        values.extend(page)
+        token = response.get("NextToken")
+        if not token:
+            return values
+    raise ValueError("Budget API returned excessive pagination")
+
+
+def has_staging_cost_budget(client, account: str) -> bool:
+    """Require a capped, account-wide project budget with an actual alert.
+
+    A configured email subscriber is necessary but not sufficient: AWS may
+    require confirmation. Email confirmation and a hard provider spend limit
+    remain separate manual release gates.
+    """
+    if not isinstance(account, str) or not account.isdigit() or len(account) != 12:
+        return False
+    expected_name = STAGING_BUDGET_PREFIX + account
+    budgets = _budget_pages(
+        client.describe_budgets, "Budgets", kwargs={"AccountId": account},
+    )
+    for budget in budgets:
+        if not isinstance(budget, dict) or budget.get("BudgetName") != expected_name:
+            continue
+        if (
+            budget.get("BudgetType") != "COST"
+            or budget.get("TimeUnit") != "MONTHLY"
+            or budget.get("CostFilters")
+        ):
+            return False
+        limit = budget.get("BudgetLimit") or {}
+        if not isinstance(limit, dict) or limit.get("Unit") != "USD":
+            return False
+        try:
+            amount = Decimal(str(limit.get("Amount", "")))
+        except (InvalidOperation, ValueError):
+            return False
+        if not amount.is_finite() or not 0 < amount <= MAX_STAGING_BUDGET_USD:
+            return False
+
+        notifications = _budget_pages(
+            client.describe_notifications_for_budget,
+            "Notifications",
+            kwargs={"AccountId": account, "BudgetName": expected_name},
+        )
+        for note in notifications:
+            if not isinstance(note, dict):
+                continue
+            if (
+                note.get("NotificationType") != "ACTUAL"
+                or note.get("ComparisonOperator") != "GREATER_THAN"
+                or note.get("ThresholdType") != "PERCENTAGE"
+            ):
+                continue
+            try:
+                threshold = Decimal(str(note.get("Threshold", "")))
+            except (InvalidOperation, ValueError):
+                continue
+            if not threshold.is_finite() or not 0 < threshold <= 80:
+                continue
+            subscribers = _budget_pages(
+                client.describe_subscribers_for_notification,
+                "Subscribers",
+                kwargs={
+                    "AccountId": account,
+                    "BudgetName": expected_name,
+                    "Notification": note,
+                },
+            )
+            if any(
+                isinstance(sub, dict)
+                and sub.get("SubscriptionType") == "EMAIL"
+                and isinstance(sub.get("Address"), str)
+                and "@" in sub["Address"]
+                for sub in subscribers
+            ):
+                return True
+        return False
+    return False
 
 
 def has_budget_alert(client, account: str) -> bool:
@@ -120,13 +220,13 @@ def run(session) -> Checks:
     checks.passed.extend(identity_checks.passed)
     checks.blocked.extend(identity_checks.blocked)
     try:
-        monitored = has_budget_alert(
+        monitored = has_staging_cost_budget(
             session.client("budgets", region_name="us-east-1"),
             aws_account,
         )
     except Exception:
         monitored = False
-    checks.require(monitored, "AWS cost budget has at least one notification subscriber")
+    checks.require(monitored, "Dedicated staging monthly USD budget <= 25 with configured ACTUAL alert email subscriber")
     # No model invocation or cloud mutations. Verify the control plane is reachable.
     control = session.client("bedrock-agentcore-control", region_name=REGION)
     control.list_gateways(maxResults=1)
