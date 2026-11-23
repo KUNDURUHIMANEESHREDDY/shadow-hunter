@@ -113,7 +113,9 @@ These are system requirements, not claims that the current repository already sa
 - **Full regression:** 228 Python tests passed on merged `main` at `fa64c68` (including concurrent Cognito/AgentCore test additions); repository validator and git diff checks passed. The pre-merge security branch had 201 passing tests and compileall success.
 - **Static/dependency checks:** Bandit medium/high scan exit 0; pip-audit on `src/requirements.txt` returned no known vulnerabilities (exit 0).
 - **Live staging unauthenticated checks:** `GET /prod/health` returned 200 with anti-framing/nosniff headers; operator audit/approvals and customer agent tool/chat endpoints returned 401 without bearer tokens.
-- **Not finished:** AWS CLI session expired before full staging audit key/byte verification. No real two-tenant Cognito/OBO tokens, authenticated staging cross-tenant matrix or independent penetration test evidence is available. Production remains **NO-GO**. See [verification report](docs/cycles/2026-11-23-security-validation.md).
+- **Live staging AWS audit verification:** After AWS reauthentication, the full audit gate passed: **3 DynamoDB audit records / 3 S3 objects, exact bytes matching, no missing/orphan/duplicate/mismatched records**. S3 Object Lock GOVERNANCE (one-day staging retention), versioning and all public-access blocks were verified.
+- **Live Cognito configuration:** The dedicated MFA API confirms MFA ON with TOTP enabled. Corrected Cognito smoke runner passes live read-only pool/client/delegation inspection. Another merged branch already corrected the `DescribeUserPool.EnabledMfas` false-positive.
+- **Still pending:** Actual synthetic customer/operator MFA sign-ins, scoped OBO tokens, authenticated two-tenant staging checks and a comprehensive live penetration test. Remote desktop tool capacity was exhausted before running `--mfa`. Production remains **NO-GO**. See the [live AWS security evidence](docs/cycles/2026-11-23-live-aws-security-verification.md) and [earlier test matrix](docs/cycles/2026-11-23-security-validation.md).
 
 ## Production acceptance criteria
 
