@@ -119,6 +119,39 @@ These are system requirements, not claims that the current repository already sa
 - **Security rerun:** Bounded staging endpoint checks all passed (6/6), audit 3/3 content reconciliation passed again, and the updated isolated local Python suite passed **250 tests**.
 - **Still pending:** Scoped OAuth OBO exchange, real authenticated two-tenant staging checks, AgentCore Harness/Gateway execution (health currently reports `agentcore_configured=false`), and a comprehensive scoped live penetration test. Production remains **NO-GO**. See [live MFA rerun evidence](docs/cycles/2026-11-23-staging-mfa-success.md), [audit verification](docs/cycles/2026-11-23-live-aws-security-verification.md), and [earlier test matrix](docs/cycles/2026-11-23-security-validation.md).
 
+## Production readiness — verified 23 November 2026
+
+Three separately committed release-gate improvements are available on `main`:
+
+1. **Managed AgentCore proof**: bounded final assistant stream parsing and
+   `scripts/verify_harness_tool_e2e.py`, which requires both observed Harness
+   tool events and a matching application policy audit trace. The AWS staging
+   account currently has **zero** Harnesses, Gateways, Policy Engines and
+   OAuth credential providers; actual managed tool invocation is **NOT RUN**.
+2. **Real cross-tenant OBO gate**:
+   `scripts/verify_two_tenant_staging.py` checks two independent genuine
+   synthetic delegated tenant tokens, both own-resource reads, cross-tenant
+   denials, missing/foreign nondisclosure and four audit decisions. Genuine
+   delegated two-tenant credentials were not available for a live run.
+3. **Hosted Red/Blue evaluation**:
+   `scripts/benchmark_hosted_red_blue.py` validates a bounded NVIDIA NIM
+   operator run, correlated evaluation audit events and a sanitized policy
+   confusion matrix. No real hosted benchmark was executed during this
+   development cycle; the local workstation did not have its operator JWT or
+   provider keys configured.
+
+**AWS preflight:** the read-only staging preflight confirmed all three
+CloudFormation stacks, Cognito MFA/delegation requirements and AgentCore
+control-plane access. It **blocked** on an AWS cost budget with a notification
+subscriber. Budgets are not spending caps; usage controls and explicit
+authorization are required before billable deployment.
+
+**Decision: production NO-GO.** Successful local tests and UI E2E do not
+replace the managed Harness/Gateway/Policy deployment, genuine Cognito
+OBO token exchange, live two-tenant security proof, actual hosted evaluation,
+or a scoped independent penetration test. See the
+[production gate record](docs/cycles/2026-11-23-production-gates-progress.md).
+
 ## Production acceptance criteria
 
 A release candidate is not accepted until the relevant criteria are demonstrated with reproducible evidence.
