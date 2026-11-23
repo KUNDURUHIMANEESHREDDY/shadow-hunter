@@ -134,3 +134,16 @@ This is still **not a production SLA**: a single worker per room is expected,
 at-most-once business processing is not claimed across process crashes, and
 real room membership, reconnect, provider response shape, and message replay
 must be tested with actual provider accounts and staging identities.
+
+### Live credential readiness checks
+
+Run `python -m shadow_hunter.sponsor_preflight` to inspect configuration
+without disclosing values or making network calls. Only with permission from
+the provider account owner use `python -m shadow_hunter.sponsor_preflight
+--band-auth` for one read-only BAND agent identity request. It never invokes
+Lyzr or attempts a paid inference call. Successful BAND authentication is not
+proof of room membership, incoming messages, or AWS production readiness.
+
+Finch publishing details and safety claims are in
+`docs/finch-publishing-pack.md`. The AdaL storyboard is a handoff document,
+not evidence of a video produced inside AdaL.
