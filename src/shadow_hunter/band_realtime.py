@@ -18,6 +18,12 @@ from urllib.parse import urlencode
 from .band_worker import BandLyzrAdvisoryWorker, BandRoomTransport
 from .sponsors import LyzrAdvisor, SponsorConfigurationError, SponsorProviderError, _identifier
 
+try:
+    from websockets.exceptions import ConnectionClosed as _WebSocketClosed
+except ImportError:
+    class _WebSocketClosed(Exception):
+        """Only a no-dependency test fallback; real mode requires websockets."""
+
 WS_ORIGIN = "wss://app.band.ai/api/v1/socket/websocket"
 MAX_FRAME = 65536
 MAX_RETRIES = 5
@@ -123,10 +129,8 @@ class BandRealtimeListener:
                     max_size=MAX_FRAME,
                     ping_interval=20,
                 ) as ws:
-                    # REST catch-up handles missed events while offline.
-                    processed += self._drain(self.max_messages - processed)
-                    if processed >= self.max_messages:
-                        break
+                    # Join first; a second REST catch-up after confirmation
+                    # closes the gap between reconnect and subscription.
                     ref = 1
                     join_ref = str(ref)
                     ws.send(json.dumps([join_ref, join_ref, topic, "phx_join", {}]))
@@ -150,13 +154,14 @@ class BandRealtimeListener:
                             if payload.get("status") != "ok":
                                 raise BandRealtimeError("BAND refused room subscription")
                             joined = True
+                            processed += self._drain(self.max_messages - processed)
                         elif event == "message_created" and message_topic == topic and joined:
                             processed += self._drain(self.max_messages - processed)
                         elif event in {"phx_error", "phx_close"} and message_topic == topic:
                             raise BandRealtimeError("BAND room channel closed")
                     if self.clock() - start >= self.max_seconds:
                         break
-            except (OSError, EOFError, TimeoutError, BandRealtimeError) as exc:
+            except (OSError, EOFError, TimeoutError, BandRealtimeError, _WebSocketClosed) as exc:
                 if reconnects >= self.max_reconnects:
                     raise BandRealtimeError("BAND reconnection budget exhausted") from exc
                 reconnects += 1
