@@ -112,3 +112,38 @@ Cedar Policy live deployment, authenticated Cognito MFA and OBO end-to-end,
 read-only audit archive verification and full staging security review.
 See `docs/cycles/2026-11-23-agentcore-staging-gates.md` and
 `docs/cycles/2026-11-23-cognito-live-auth-gate.md`.
+
+
+### BAND production-shaped real-time listener (opt-in)
+
+The room worker now has an optional Phoenix WebSocket notification listener
+(`python -m shadow_hunter.band_realtime`). This uses the documented
+`wss://app.band.ai/api/v1/socket/websocket` origin and joins
+`chat_room:{room_id}`. The listener sets the BAND API key in the handshake
+header (never the URL), sends protocol heartbeats, reconnects with bounded
+backoff, and **rechecks REST /messages/next on every connection** to recover
+missed events. The WebSocket frame is only a wake-up signal; it is never
+interpreted as a tool command. The REST claim/reply/ack path remains authoritative.
+
+Requires `SHADOW_HUNTER_BAND_AGENT_ID` in addition to BAND and Lyzr
+settings. Install optional dependency with `pip install -e ".[band-realtime]"`.
+Limits default to 20 processed messages, 600 seconds, and 5 reconnect attempts
+per invocation. No listener auto-starts in the API process.
+
+This is still **not a production SLA**: a single worker per room is expected,
+at-most-once business processing is not claimed across process crashes, and
+real room membership, reconnect, provider response shape, and message replay
+must be tested with actual provider accounts and staging identities.
+
+### Live credential readiness checks
+
+Run `python -m shadow_hunter.sponsor_preflight` to inspect configuration
+without disclosing values or making network calls. Only with permission from
+the provider account owner use `python -m shadow_hunter.sponsor_preflight
+--band-auth` for one read-only BAND agent identity request. It never invokes
+Lyzr or attempts a paid inference call. Successful BAND authentication is not
+proof of room membership, incoming messages, or AWS production readiness.
+
+Finch publishing details and safety claims are in
+`docs/finch-publishing-pack.md`. The AdaL storyboard is a handoff document,
+not evidence of a video produced inside AdaL.
