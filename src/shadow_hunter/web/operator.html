@@ -150,8 +150,8 @@
       <div class="metric"><span>Policy accuracy</span><strong>—</strong></div>
     </div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Round</th><th>Red strategy</th><th>Scenario</th><th>Blue model</th><th>Decision</th><th>Risk</th><th>Threat categories</th><th>Blue analysis</th><th>Outcome</th></tr></thead>
-      <tbody id="agent-eval-results"><tr><td colspan="9" class="muted">Connect to load the latest evaluation.</td></tr></tbody>
+      <thead><tr><th>Round</th><th>Red strategy</th><th>Scenario</th><th>Blue model</th><th>Decision</th><th>Risk</th><th>Threat categories</th><th>Blue analysis</th><th>Outcome</th><th>Evidence</th></tr></thead>
+      <tbody id="agent-eval-results"><tr><td colspan="10" class="muted">Connect to load the latest evaluation.</td></tr></tbody>
     </table></div>
   </section>
   <section class="panel" id="trace-panel" hidden>
@@ -206,7 +206,7 @@
     $("agent-eval-metrics").querySelectorAll("strong").forEach(node => { node.textContent = "—"; });
     $("approvals").innerHTML = '<tr><td colspan="6" class="muted">Sign in to load approvals.</td></tr>';
     $("audit").innerHTML = '<tr><td colspan="6" class="muted">Sign in to load audit events.</td></tr>';
-    $("agent-eval-results").innerHTML = '<tr><td colspan="9" class="muted">Sign in to load evaluations.</td></tr>';
+    $("agent-eval-results").innerHTML = '<tr><td colspan="10" class="muted">Sign in to load evaluations.</td></tr>';
     $("trace-panel").hidden = true;
     $("trace-id").textContent = "";
     $("trace-events").replaceChildren();
@@ -327,7 +327,7 @@
   function renderAgentEvaluation(snapshot) {
     const run = snapshot && snapshot.run;
     if (!run) {
-      $("agent-eval-results").innerHTML = '<tr><td colspan="9" class="muted">No evaluation has been run yet.</td></tr>';
+      $("agent-eval-results").innerHTML = '<tr><td colspan="10" class="muted">No evaluation has been run yet.</td></tr>';
       return;
     }
     const details = run.details || {};
@@ -347,6 +347,13 @@
       const outcome = detail.attack_success ? "ATTACK ACCEPTED" :
         (detail.passed ? (detail.is_attack ? "PREVENTED" : "CONTROL PASSED") : "EXPECTATION MISSED");
       const outcomeClass = detail.attack_success ? "DENY" : (detail.passed ? "ALLOW" : "ESCALATE");
+      // A local evidence receipt is a gateway/audit consistency proof, not
+      // an attestation of the hosted model or an external immutable archive.
+      const hasReceipt = detail.evidence_verified === true &&
+        /^[0-9a-f]{64}$/.test(String(detail.evidence_sha256 || ""));
+      const evidenceStatus = hasReceipt
+        ? "Verified audit · " + detail.evidence_sha256.slice(0, 12)
+        : "Not independently verified";
       return '<tr><td>' + escapeHtml(detail.round ?? "—") +
         '</td><td><strong>' + escapeHtml(detail.strategy_id ?? "—") + '</strong><div class="muted">' + escapeHtml(detail.strategy_summary ?? "") +
         '</div></td><td>' + escapeHtml(detail.scenario_id ?? row.resource_id ?? "—") +
@@ -355,8 +362,9 @@
         '</span></td><td>' + escapeHtml(detail.risk_score ?? "—") +
         '</td><td>' + escapeHtml((detail.threat_categories || []).join(", ")) +
         '</td><td>' + escapeHtml(detail.analysis_summary ?? "") +
-        '</td><td><span class="pill ' + outcomeClass + '">' + outcome + '</span></td></tr>';
-    }).join("") || '<tr><td colspan="9" class="muted">No scenario outcomes.</td></tr>';
+        '</td><td><span class="pill ' + outcomeClass + '">' + outcome +
+        '</span></td><td>' + escapeHtml(evidenceStatus) + '</td></tr>';
+    }).join("") || '<tr><td colspan="10" class="muted">No scenario outcomes.</td></tr>';
   }
   function renderSecurityPulse(rows) {
     const decisions = rows.filter(row =>
