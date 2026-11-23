@@ -116,3 +116,15 @@ does not substitute for two-tenant authenticated identity testing.
 - This is a tiny, bounded negative authorization smoke test. It cannot
   establish MFA correctness, authenticated cross-tenant enforcement, or full
   vulnerability coverage.
+
+## Merged-main verification
+
+Security PR #2 was squash-merged into `main` at commit `fa64c68`.
+The clean post-merge worktree, including independently added concurrent
+Cognito/AgentCore tests, completed `python -m pytest -q --disable-warnings
+--tb=short`: **228 passed in 26.03s**. Repository validation and
+`git diff --check` passed. The original user's dirty local `main`
+worktree was not modified.
+
+The AWS CLI credential was still expired during this cycle, so there is no
+live archive reconciliation or authenticated two-tenant staging result.
