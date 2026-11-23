@@ -44,7 +44,7 @@ counterexample must make the combined gate fail.
 isolated worktree at security branch commit `45124a0` (Python 3.11.9).
 `python scripts/validate-repo.py`, `python -m compileall` and
 `git diff --check` succeeded. A Bandit medium/high severity source scan
-also returned exit code zero. The tests were not run against live Cognito
+also returned exit code zero. `python -m pip_audit -r src/requirements.txt --progress-spinner off` returned `No known vulnerabilities found` (exit 0). The tests were not run against live Cognito
 users or the staging AWS data plane.
 
 ## Full archive integrity check (read-only)
