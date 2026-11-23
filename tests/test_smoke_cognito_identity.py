@@ -43,9 +43,9 @@ def output_values():
 
 class FakeCognito:
     def __init__(self):
+        self.mfa = {"MfaConfiguration": "ON", "SoftwareTokenMfaConfiguration": {"Enabled": True}}
         self.pool = {
             "MfaConfiguration": "ON",
-            "EnabledMfas": ["SOFTWARE_TOKEN_MFA"],
             "DeletionProtection": "ACTIVE",
             "LambdaConfig": {"PreTokenGenerationConfig": {"LambdaVersion": "V3_0"}},
         }
@@ -68,6 +68,9 @@ class FakeCognito:
 
     def describe_user_pool(self, *, UserPoolId):
         return {"UserPool": self.pool}
+
+    def get_user_pool_mfa_config(self, *, UserPoolId):
+        return self.mfa
 
     def describe_user_pool_client(self, *, UserPoolId, ClientId):
         return {"UserPoolClient": self.clients[ClientId]}
@@ -96,7 +99,7 @@ def test_non_staging_and_noncomplete_stacks_rejected():
 
 @pytest.mark.parametrize("mutation", [
     lambda idp: idp.pool.update(MfaConfiguration="OFF"),
-    lambda idp: idp.pool["EnabledMfas"].clear(),
+    lambda idp: idp.mfa["SoftwareTokenMfaConfiguration"].update(Enabled=False),
     lambda idp: idp.pool["LambdaConfig"]["PreTokenGenerationConfig"].update(LambdaVersion="V2_0"),
     lambda idp: idp.clients["cust-123"].update(WriteAttributes=["email", "custom:tenant_id"]),
     lambda idp: idp.clients["operator-123"].update(AllowedOAuthFlows=["implicit"]),
