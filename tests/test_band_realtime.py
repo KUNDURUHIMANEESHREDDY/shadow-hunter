@@ -106,8 +106,11 @@ def test_heartbeat_is_phoenix_event_and_bounded_by_deadline():
 
 def test_reconnect_catches_up_after_disconnect_without_duplicate_ws_dispatch():
     clock = Clock()
-    sockets = [Socket(clock, [EOFError()]), Socket(clock, [])]
-    worker = FakeWorker(["idle", "processed", "idle"])
+    sockets = [
+        Socket(clock, [EOFError()]),
+        Socket(clock, [frame("1", "chat_room:room-123", "phx_reply", {"status": "ok"})]),
+    ]
+    worker = FakeWorker(["processed", "idle"])
     counter = iter(sockets)
     result = listener(worker, clock, lambda *a, **kw: next(counter),
                       max_seconds=8, max_messages=3, max_reconnects=2).run()
@@ -128,3 +131,16 @@ def test_rejects_invalid_keys_ids_and_unbounded_configuration():
         BandRealtimeListener(FakeWorker([]), "agent/evil", "sample-band-key", "room-1")
     with pytest.raises(Exception):
         listener(FakeWorker([]), Clock(), None, max_seconds=100000)
+
+
+def test_rest_catchup_occurs_after_channel_join_to_avoid_subscription_race():
+    clock = Clock()
+    worker = FakeWorker(["processed", "idle"])
+    socket = Socket(clock, [
+        frame("1", "chat_room:room-123", "phx_reply", {"status": "ok"}),
+    ])
+    outcome = listener(worker, clock, lambda *a, **kw: socket,
+                       max_seconds=5, max_messages=2).run()
+    assert outcome["processed"] == 1
+    assert socket.sent[0][3] == "phx_join"
+    assert worker.calls == 2
