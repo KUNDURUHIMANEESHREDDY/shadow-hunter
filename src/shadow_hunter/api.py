@@ -118,7 +118,7 @@ def create_app(
         # Operator and agent responses can contain audit evidence or other
         # account-scoped information. Do not let browsers/shared caches retain
         # API data across sign-out, expired tokens, or account switches.
-        if request.url.path == "/operator" or request.url.path.startswith(("/operator/", "/v1/")):
+        if request.url.path in {"/operator", "/customer", "/operator/config", "/customer/config"} or request.url.path.startswith(("/operator/", "/customer/", "/v1/")):
             response.headers["Cache-Control"] = "no-store"
             response.headers["Pragma"] = "no-cache"
         return response
@@ -198,6 +198,61 @@ def create_app(
     @app.get("/operator")
     def operator_console() -> FileResponse:
         return FileResponse(WEB_ROOT / "operator.html")
+
+    @app.get("/customer/config")
+    def customer_console_config() -> dict[str, Any]:
+        # Only publish public OAuth metadata, never AWS credentials or M2M secrets.
+        hosted_domain = os.environ.get(
+            "SHADOW_HUNTER_COGNITO_HOSTED_UI_DOMAIN", ""
+        ).strip().rstrip("/")
+        parsed = urlsplit(hosted_domain) if hosted_domain else None
+        allowed_domain = bool(
+            parsed and parsed.scheme == "https" and parsed.hostname
+            and not parsed.username and not parsed.password
+            and not parsed.query and not parsed.fragment
+            and parsed.path in ("", "/")
+        )
+        mode = os.environ.get("SHADOW_HUNTER_AUTH_MODE", "local").strip().lower()
+        client_id = os.environ.get(
+            "SHADOW_HUNTER_COGNITO_CUSTOMER_CLIENT_ID", ""
+        ).strip()
+        customer_scope = os.environ.get(
+            "SHADOW_HUNTER_COGNITO_CUSTOMER_SCOPE", "shadow-hunter/customer"
+        ).strip()
+        tool_scope = os.environ.get(
+            "SHADOW_HUNTER_COGNITO_TOOL_SCOPE", "shadow-hunter-api/refunds"
+        ).strip()
+        scopes_valid = all(
+            scope and all(ch.isalnum() or ch in "-_./:" for ch in scope)
+            for scope in (customer_scope, tool_scope)
+        )
+        available = bool(
+            mode == "cognito" and allowed_domain and client_id
+            and client_id.isalnum() and scopes_valid
+        )
+        return {
+            "auth_mode": mode,
+            "cognito": {
+                "login_available": available,
+                "hosted_ui_domain": hosted_domain if available else "",
+                "customer_client_id": client_id if available else "",
+                "scopes": (
+                    f"openid email {customer_scope} {tool_scope}"
+                    if available else ""
+                ),
+            },
+        }
+
+    @app.get("/customer")
+    def customer_console() -> FileResponse:
+        return FileResponse(WEB_ROOT / "customer.html")
+
+    @app.get("/v1/customer/session")
+    def customer_session(
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, bool]:
+        customer(authorization)  # JWT issuer, expiry, audience, scopes and trusted claims.
+        return {"authenticated": True}
 
     @app.get("/v1/operator/settings/integrations")
     def integration_settings_status(

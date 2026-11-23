@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Shadow Hunter · Customer</title>
+<style>
+:root{color-scheme:light;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#172437;background:#f6f8fc}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 80% 0,#e5ecff 0,transparent 40%),#f6f8fc}
+header{max-width:980px;margin:auto;display:flex;align-items:center;justify-content:space-between;padding:26px 24px}
+.brand{font-size:16px;font-weight:760;letter-spacing:-.35px}.brand b{display:inline-grid;place-items:center;width:32px;height:32px;border-radius:11px;background:#213659;color:#fff;margin-right:10px}
+header a{color:#496184;text-decoration:none;font-size:13px}
+main{max-width:800px;margin:6vh auto 60px;padding:0 24px}
+.eyebrow{font-size:12px;color:#4d66a1;font-weight:700;text-transform:uppercase;letter-spacing:1.7px}
+h1{font-weight:750;letter-spacing:-1.5px;font-size:clamp(32px,5vw,52px);margin:15px 0}
+.lead{color:#61718b;line-height:1.65;margin:0 0 30px;max-width:610px;font-size:16px}
+.panel{background:rgba(255,255,255,.94);border:1px solid #e2e8f1;border-radius:22px;box-shadow:0 18px 60px #25334d10;padding:30px;margin-top:22px}
+h2{font-size:18px;margin:0 0 10px;letter-spacing:-.4px}
+p{line-height:1.55}small,.muted{color:#69788f}
+.controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:22px}
+button{font:inherit;background:#203759;color:#fff;border:0;border-radius:12px;padding:13px 19px;cursor:pointer;font-size:14px;font-weight:650}
+button.secondary{background:#edf2f9;color:#273e60}
+button:disabled{opacity:.5;cursor:not-allowed}button:focus-visible,textarea:focus-visible{outline:3px solid #79a5e3;outline-offset:2px}
+#status{color:#556680;margin-top:16px;font-size:13px;min-height:20px}
+#chat{display:none}#chat.active{display:block}
+textarea{width:100%;min-height:126px;resize:vertical;border:1px solid #cfd9e8;border-radius:13px;padding:14px;font:inherit;color:#1a2940;margin-top:12px}
+.output{white-space:pre-wrap;overflow-wrap:anywhere;background:#f4f7fb;border-radius:14px;border:1px solid #e0e6ef;min-height:76px;padding:18px;margin-top:20px;line-height:1.55;color:#2d3d57}
+.privacy{color:#72819a;font-size:12px;margin-top:28px;line-height:1.7}
+@media(max-width:550px){header{padding:20px}main{padding:0 16px} .panel{padding:22px}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><b>SH</b>Shadow Hunter</div>
+  <a href="operator">Operator console</a>
+</header>
+<main>
+  <div class="eyebrow">Private, governed AI</div>
+  <h1>Your account, your permissions.</h1>
+  <p class="lead">Sign in securely using Cognito. Shadow Hunter verifies your identity before any agent action and keeps each customer's data isolated.</p>
+  <section class="panel" aria-labelledby="sign-in-title">
+    <h2 id="sign-in-title">Account access</h2>
+    <p class="muted" id="identity-description">Checking available sign-in method…</p>
+    <div class="controls">
+      <button id="sign-in" disabled>Sign in with Cognito</button>
+      <button id="sign-out" class="secondary" hidden>Sign out</button>
+    </div>
+    <p id="status" role="status" aria-live="polite"></p>
+  </section>
+  <section id="chat" class="panel" aria-labelledby="chat-title">
+    <h2 id="chat-title">Secure agent chat</h2>
+    <p class="muted">Your authenticated session is passed to the managed Harness. The policy gateway enforces permissions on tools.</p>
+    <label for="prompt">Your request</label>
+    <textarea id="prompt" maxlength="8000" placeholder="Ask about an order or refund…"></textarea>
+    <div class="controls"><button id="send">Send request</button></div>
+    <div id="answer" class="output" role="status" aria-live="polite">Responses are shown here after verification.</div>
+  </section>
+  <p class="privacy">No API keys or passwords are entered in this page. OAuth uses authorization code + PKCE. Access tokens stay in this tab's memory and are cleared on sign-out or refresh; only the short-lived login challenge and state are kept in session storage.</p>
+</main>
+<script>
+(() => {
+"use strict";
+const $ = id => document.getElementById(id);
+const API_BASE = location.pathname.replace(/\/customer\/?$/, "");
+const apiUrl = path => API_BASE + path;
+const redirectUri = () => location.origin + location.pathname;
+const STORAGE_STATE = "shadow_hunter_customer_oauth_state";
+const STORAGE_VERIFIER = "shadow_hunter_customer_pkce_verifier";
+let config = null;
+let accessToken = "";
+let generation = 0;
+let pending = null;
+const setStatus = (message, error = false) => {
+  $("status").textContent = message;
+  $("status").style.color = error ? "#ae283c" : "#556680";
+};
+const clearLoginChallenge = () => {
+  sessionStorage.removeItem(STORAGE_STATE);
+  sessionStorage.removeItem(STORAGE_VERIFIER);
+};
+const base64Url = bytes => {
+  const data = bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : bytes;
+  let binary = "";
+  for (const part of data) binary += String.fromCharCode(part);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+};
+const randomBase64Url = size => base64Url(crypto.getRandomValues(new Uint8Array(size)));
+function clearSession() {
+  generation += 1;
+  if (pending) { pending.abort(); pending = null; }
+  accessToken = "";
+  $("prompt").value = "";
+  $("answer").textContent = "Responses are shown here after verification.";
+  $("chat").classList.remove("active");
+  $("sign-out").hidden = true;
+  $("sign-in").hidden = !config?.cognito?.login_available;
+}
+async function startLogin() {
+  if (!config?.cognito?.login_available) return;
+  if (!window.isSecureContext || !crypto.subtle) {
+    setStatus("Secure HTTPS is required to sign in.", true);
+    return;
+  }
+  const state = randomBase64Url(32);
+  const verifier = randomBase64Url(48);
+  clearLoginChallenge();
+  sessionStorage.setItem(STORAGE_STATE, state);
+  sessionStorage.setItem(STORAGE_VERIFIER, verifier);
+  const challenge = base64Url(await crypto.subtle.digest(
+    "SHA-256", new TextEncoder().encode(verifier)
+  ));
+  const params = new URLSearchParams({
+    response_type: "code",
+    client_id: config.cognito.customer_client_id,
+    redirect_uri: redirectUri(),
+    scope: config.cognito.scopes,
+    state,
+    code_challenge: challenge,
+    code_challenge_method: "S256"
+  });
+  location.assign(config.cognito.hosted_ui_domain + "/oauth2/authorize?" + params);
+}
+async function verifySession(token) {
+  const response = await fetch(apiUrl("/v1/customer/session"), {
+    headers: {Authorization: "Bearer " + token},
+    cache: "no-store"
+  });
+  return response.ok && (await response.json()).authenticated === true;
+}
+async function completeLogin() {
+  const params = new URLSearchParams(location.search);
+  const code = params.get("code");
+  const error = params.get("error");
+  if (!code && !error) return false;
+  const state = params.get("state");
+  const expected = sessionStorage.getItem(STORAGE_STATE);
+  const verifier = sessionStorage.getItem(STORAGE_VERIFIER);
+  clearLoginChallenge();
+  history.replaceState({}, document.title, location.pathname);
+  if (error) { setStatus("Sign-in was cancelled or unsuccessful. Try again.", true); return false; }
+  if (!config?.cognito?.login_available || !state || state !== expected || !verifier) {
+    setStatus("Sign-in state could not be verified. Please start again.", true);
+    return false;
+  }
+  const response = await fetch(config.cognito.hosted_ui_domain + "/oauth2/token", {
+    method: "POST",
+    headers: {"Content-Type": "application/x-www-form-urlencoded"},
+    cache: "no-store",
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      client_id: config.cognito.customer_client_id,
+      code,
+      code_verifier: verifier,
+      redirect_uri: redirectUri()
+    })
+  });
+  if (!response.ok) { setStatus("Unable to complete Cognito sign-in.", true); return false; }
+  const tokens = await response.json();
+  if (typeof tokens.access_token !== "string" || !tokens.access_token ||
+      !(await verifySession(tokens.access_token))) {
+    setStatus("Sign-in token failed Shadow Hunter verification.", true);
+    return false;
+  }
+  accessToken = tokens.access_token;
+  $("sign-in").hidden = true;
+  $("sign-out").hidden = false;
+  $("chat").classList.add("active");
+  setStatus("Signed in. Your session is protected by Cognito.");
+  return true;
+}
+async function sendRequest() {
+  const prompt = $("prompt").value.trim();
+  if (!accessToken || !prompt || prompt.length > 8000) return;
+  if (pending) pending.abort();
+  const controller = new AbortController();
+  pending = controller;
+  const currentGeneration = generation;
+  const currentToken = accessToken;
+  $("send").disabled = true;
+  $("answer").textContent = "Checking your request…";
+  try {
+    const response = await fetch(apiUrl("/v1/agent/chat"), {
+      method: "POST",
+      headers: {"Authorization": "Bearer " + currentToken, "Content-Type": "application/json"},
+      cache: "no-store",
+      body: JSON.stringify({prompt}),
+      signal: controller.signal
+    });
+    if (currentGeneration !== generation || currentToken !== accessToken) return;
+    if (response.status === 401) {
+      clearSession();
+      setStatus("Session expired. Sign in again.", true);
+      return;
+    }
+    if (!response.ok) {
+      $("answer").textContent = response.status === 503
+        ? "The managed AgentCore Harness is not configured yet."
+        : "The request could not be verified. No completion is claimed.";
+      return;
+    }
+    const data = await response.json();
+    if (currentGeneration !== generation || currentToken !== accessToken) return;
+    $("answer").textContent = typeof data.text === "string" && data.text.trim()
+      ? data.text : "The agent did not return a verified answer.";
+  } catch (error) {
+    if (currentGeneration === generation && error.name !== "AbortError") {
+      $("answer").textContent = "The connection was interrupted. The task is not confirmed complete.";
+    }
+  } finally {
+    if (pending === controller) pending = null;
+    if (currentGeneration === generation) $("send").disabled = false;
+  }
+}
+$("sign-in").addEventListener("click", () => startLogin().catch(() => {
+  clearLoginChallenge();
+  setStatus("Unable to start secure sign-in.", true);
+}));
+$("send").addEventListener("click", sendRequest);
+$("sign-out").addEventListener("click", () => {
+  clearSession();
+  clearLoginChallenge();
+  setStatus("Signed out. Session data was cleared.");
+  if (config?.cognito?.login_available) {
+    const params = new URLSearchParams({
+      client_id: config.cognito.customer_client_id,
+      logout_uri: redirectUri()
+    });
+    location.assign(config.cognito.hosted_ui_domain + "/logout?" + params);
+  }
+});
+async function initialize() {
+  try {
+    const response = await fetch(apiUrl("/customer/config"), {cache: "no-store"});
+    if (!response.ok) throw Error("configuration unavailable");
+    config = await response.json();
+    $("sign-in").disabled = !config?.cognito?.login_available;
+    $("identity-description").textContent = config?.cognito?.login_available
+      ? "Continue with your Cognito account. No access key or API secret is needed."
+      : "Cognito sign-in is not configured for this environment.";
+    if (!config?.cognito?.login_available) {
+      clearLoginChallenge();
+      setStatus("An administrator must configure Cognito and register this exact HTTPS callback.");
+      return;
+    }
+    if (await completeLogin()) return;
+    if (!$("status").textContent) setStatus("Sign in to continue.");
+  } catch {
+    clearLoginChallenge();
+    setStatus("Authentication configuration is unavailable.", true);
+  }
+}
+initialize();
+})();
+</script>
+</body>
+</html>
