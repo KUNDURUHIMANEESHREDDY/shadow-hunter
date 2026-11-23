@@ -13,6 +13,8 @@ from typing import Any
 from urllib.parse import urlsplit
 from uuid import uuid4
 
+from .agentcore_evidence import read_harness_stream
+
 
 _COMPACT_JWT = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
 
@@ -137,24 +139,16 @@ class AgentCoreHarnessClient:
                     }
                 ],
             )
-            text_parts: list[str] = []
-            for event in response.get("stream", []):
-                if "contentBlockDelta" in event:
-                    delta = event["contentBlockDelta"].get("delta", {})
-                    if isinstance(delta.get("text"), str):
-                        text_parts.append(delta["text"])
-                elif "runtimeClientError" in event:
-                    message = event["runtimeClientError"].get(
-                        "message", "Runtime client error"
-                    )
-                    raise AgentCoreInvocationError(message)
-                elif "internalServerException" in event:
-                    raise AgentCoreInvocationError("AgentCore returned an internal error")
+            evidence = read_harness_stream(response.get("stream", []))
             return {
-                "text": "".join(text_parts),
+                "text": evidence["text"],
                 "session_id": session_id,
                 "trace_id": trace_id,
                 "harness_arn": self.harness_arn,
+                "model_tool_activity": evidence["model_tool_activity"],
+                # Stream observations are NOT proof that a protected API tool
+                # was invoked: operator audit trace correlation is required.
+                "tool_execution_verified": False,
             }
         except AgentCoreInvocationError:
             raise
