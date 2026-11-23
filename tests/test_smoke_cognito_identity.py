@@ -84,6 +84,15 @@ def test_totp_matches_rfc_6238_sha1_vector():
     assert _totp("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", 59) == "287082"
 
 
+def test_totp_accepts_unpadded_base32_secret():
+    assert _totp("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ".rstrip("="), 59) == "287082"
+    # AWS Cognito can supply secrets that are not a multiple of eight characters.
+    import base64
+    secret = base64.b32encode(b"smoke-secret-for-mfa!").decode().rstrip("=")
+    assert len(secret) % 8 != 0
+    assert len(_totp(secret, 59)) == 6
+
+
 def test_read_only_live_pool_contract_passes():
     outputs = _stack_outputs(FakeCloudFormation(), "shadow-hunter-identity-staging")
     agent = _inspect_identity(FakeCognito(), outputs, "ap-southeast-2")
