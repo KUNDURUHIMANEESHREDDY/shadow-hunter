@@ -39,10 +39,13 @@ cover: clean complete archive with pagination; altered bytes; missing archive
 object; orphaned archive object; duplicate event IDs. Any integrity
 counterexample must make the combined gate fail.
 
-**Verification state at authoring:** source/tests are committed on a review
-branch; the connected local machine stopped responding during the full-suite
-baseline run. No test result is claimed until an actual completed run is
-recorded with a commit SHA and environment.
+**Executed verification (23 Nov 2026):** dedicated security tests
+`14 passed in 12.25s` and full suite `201 passed in 28.47s`, on a clean
+isolated worktree at security branch commit `45124a0` (Python 3.11.9).
+`python scripts/validate-repo.py`, `python -m compileall` and
+`git diff --check` succeeded. A Bandit medium/high severity source scan
+also returned exit code zero. The tests were not run against live Cognito
+users or the staging AWS data plane.
 
 ## Full archive integrity check (read-only)
 
@@ -96,3 +99,20 @@ or independently signed event-chain attestations.
 No staging penetration test or full live audit reconciliation is claimed
 until that evidence is attached. The existing synthetic staging smoke test
 does not substitute for two-tenant authenticated identity testing.
+
+## Live unauthenticated staging evidence (23 November 2026)
+
+- `GET /prod/health`: **HTTP 200**, with frame-ancestors 'none',
+  X-Frame-Options DENY, X-Content-Type-Options nosniff, and Referrer-Policy
+  no-referrer.
+- `GET /prod/v1/operator/audit`: **HTTP 401** without an access token.
+- `GET /prod/v1/operator/approvals`: **HTTP 401** without an access token.
+- `POST /prod/v1/agent/tools/get_order`: **HTTP 401** without a token.
+- `POST /prod/v1/agent/chat`: **HTTP 401** without a token.
+- `aws cloudformation describe-stacks ...`: **blocked**, AWS CLI returned
+  "Your session has expired. Please reauthenticate using 'aws login'".
+  Staging archive bucket discovery and live full-integrity checks were
+  therefore **not performed**. No AWS resources were changed.
+- This is a tiny, bounded negative authorization smoke test. It cannot
+  establish MFA correctness, authenticated cross-tenant enforcement, or full
+  vulnerability coverage.
