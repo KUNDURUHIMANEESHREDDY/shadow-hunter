@@ -306,3 +306,33 @@ evaluation is a **reproducible policy-safety regression**, not a substitute
 for measured hosted agent quality. A separate immutable audit archive or
 hardware-backed identity check is also needed before claiming external
 independent security attestation.
+
+
+### Explicit opt-in hosted-model smoke run
+
+The new `scripts/run_red_blue_hosted.py` is an operator-run smoke harness for
+**actual NVIDIA model calls**. It is not part of default CI because calls may
+incur provider charges and need an NVIDIA key. The CLI fails closed unless
+both `--allow-provider-calls` and a locally supplied `NVIDIA_API_KEY` are
+present. No AWS credentials, production customer data or payment provider
+are involved.
+
+```sh
+# Configure NVIDIA_API_KEY securely in the process environment first.
+python scripts/run_red_blue_hosted.py --allow-provider-calls \
+  --rounds 1 --output artifacts/red-blue-hosted.json
+```
+
+It calls the distinct configured Red and Blue NIM models (two hosted inference
+requests per round, up to three rounds), validates their structured output,
+runs the proposed synthetic action through the real deterministic policy
+gateway, verifies signed A2A audit evidence independently, and writes
+redacted policy decisions, model IDs, seeds, metrics and digest receipts.
+No prompt, provider API key, token, A2A secret, real customer identifier
+or raw provider response is stored.
+
+**Provider call status:** Unit tests use a fake NIM client to verify the
+contract without external requests. Those tests alone do **not** prove a
+live NVIDIA connection, nor a hosted security-performance advantage.
+A successful explicit hosted run and evaluation of its metrics is necessary
+before claiming model-assisted Red/Blue validation.
