@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -122,6 +123,23 @@ def analyze_hosted_result(payload: dict, audit: list, *, expected_rounds: int) -
     if not valid_id or not isinstance(rows, list) or len(rows) != expected_rounds:
         raise ValueError("Benchmark run identity or requested round count is invalid")
     analysis = _metrics(payload, rows)
+    if (
+        isinstance(payload.get("verified_rounds"), bool)
+        or payload.get("verified_rounds") != expected_rounds
+    ):
+        raise ValueError("Hosted benchmark has incomplete independently verified rounds")
+    scenario_ids = [row.get("scenario_id") for row in rows]
+    if any(not isinstance(value, str) or not value for value in scenario_ids):
+        raise ValueError("Hosted benchmark scenario identity is missing")
+    if len(set(scenario_ids)) != len(rows):
+        raise ValueError("Hosted benchmark scenario identities must be unique")
+    for row in rows:
+        if (
+            row.get("evidence_verified") is not True
+            or not isinstance(row.get("evidence_sha256"), str)
+            or re.fullmatch(r"[0-9a-f]{64}", row["evidence_sha256"]) is None
+        ):
+            raise ValueError("Hosted benchmark result lacks independently verified gateway evidence")
     runs = [
         x for x in audit
         if isinstance(x, dict) and x.get("event_type") == "AGENT_EVALUATION_RUN"
@@ -132,6 +150,11 @@ def analyze_hosted_result(payload: dict, audit: list, *, expected_rounds: int) -
     if len(runs) != 1:
         raise ValueError("Hosted model invocation is not supported by an audit run event")
     details = runs[0]["details"]
+    if (
+        details.get("verified_rounds") != expected_rounds
+        or details.get("evidence_verification") != "persisted_a2a_and_policy_v1"
+    ):
+        raise ValueError("Hosted benchmark audit does not attest verified rounds")
     for key in METRIC_KEYS:
         if details.get(key) != analysis["metrics"][key]:
             raise ValueError("Hosted benchmark audit metrics disagree")
@@ -142,6 +165,34 @@ def analyze_hosted_result(payload: dict, audit: list, *, expected_rounds: int) -
     ]
     if len(outcomes) != len(rows):
         raise ValueError("Hosted evaluation cases are not all present in audit evidence")
+    # Independently reconcile the response against persisted case results and
+    # each A2A_EVIDENCE_VERIFIED event copied from the synthetic sandbox.
+    proofs = [
+        event for event in audit if isinstance(event, dict)
+        and event.get("event_type") == "AGENT_EVALUATION_TRACE_EVENT"
+        and event.get("trace_id") == run_id
+        and isinstance(event.get("details"), dict)
+        and event["details"].get("source_event_type") == "A2A_EVIDENCE_VERIFIED"
+    ]
+    if len(proofs) != expected_rounds:
+        raise ValueError("Hosted benchmark is missing independent gateway proof events")
+    for row in rows:
+        matches = [
+            event for event in outcomes
+            if isinstance(event.get("details"), dict)
+            and event["details"].get("scenario_id") == row["scenario_id"]
+            and event["details"].get("evidence_verified") is True
+            and event["details"].get("evidence_sha256") == row["evidence_sha256"]
+            and event.get("decision") == row["decision"]
+        ]
+        proof_matches = [
+            event for event in proofs
+            if event["details"].get("scenario_id") == row["scenario_id"]
+            and event["details"].get("evidence_sha256") == row["evidence_sha256"]
+            and event["details"].get("verification_method") == "persisted_a2a_and_policy_v1"
+        ]
+        if len(matches) != 1 or len(proof_matches) != 1:
+            raise ValueError("Hosted benchmark case is not supported by matching gateway evidence")
     return {
         "report_type": "shadow_hunter_hosted_evaluation_v1",
         "provenance": "authenticated_staging_hosted_nim_and_audit",
@@ -151,6 +202,8 @@ def analyze_hosted_result(payload: dict, audit: list, *, expected_rounds: int) -
             "blue": str(details.get("blue_model", ""))[:160],
         },
         "rounds": expected_rounds,
+        "verified_rounds": expected_rounds,
+        "verification_method": "persisted_a2a_and_policy_v1",
         **analysis,
         "comparison": (
             "Attack vs legitimate control outcomes within the same hosted run; "
@@ -177,18 +230,21 @@ def run_benchmark(
     run_id = result.get("run_id")
     if not isinstance(run_id, str) or not 1 <= len(run_id) <= 64:
         raise ValueError("Invalid run ID")
-    evidence = []
-    # Three bounded retries for DynamoDB GSI eventual consistency.
+    # A partially propagated trace must not pass simply because *some* events
+    # exist. Retry boundedly until all signed A2A/gateway receipts reconcile.
+    # A final missing or contradictory proof still fails closed.
     for attempt in range(3):
         response = sender("/v1/operator/audit/trace/" + run_id, operator_token)
         evidence = _read_trace(response)
-        if evidence:
-            break
-        if attempt < 2:
+        try:
+            report = analyze_hosted_result(result, evidence, expected_rounds=rounds)
+            report["client_elapsed_seconds"] = round(clock() - start, 3)
+            return report
+        except ValueError:
+            if attempt == 2:
+                raise
             pause(0.4 * (attempt + 1))
-    report = analyze_hosted_result(result, evidence, expected_rounds=rounds)
-    report["client_elapsed_seconds"] = round(clock() - start, 3)
-    return report
+    raise ValueError("Hosted benchmark could not reconcile complete audit evidence")
 
 
 def _read_trace(response: Response) -> list:
