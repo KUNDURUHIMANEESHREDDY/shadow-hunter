@@ -297,8 +297,9 @@
       $("last-refreshed").textContent = "Updated " + new Date().toLocaleTimeString();
       $("refresh-console").hidden = false;
       setMessage("Connected. Integration secrets remain server-side; approval tokens remain in this tab's memory.");
-      $("logout").hidden = authConfig?.auth_mode !== "cognito";
-      $("cognito-login").hidden = authConfig?.auth_mode === "cognito";
+      $("logout").hidden = false;
+      $("logout").textContent = authConfig?.auth_mode === "cognito" ? "Sign out" : "Disconnect";
+      $("cognito-login").hidden = true;
     } catch (error) {
       if (generation === loadGeneration) setMessage(error.message, true);
     }
@@ -386,7 +387,9 @@
     ).join("") || '<tr><td colspan="6" class="muted">No matching audit events in the loaded window.</td></tr>';
   }
   async function showTrace(traceId) {
+    const generation = loadGeneration;
     const events = await api("/v1/operator/audit/trace/" + encodeURIComponent(traceId));
+    if (generation !== loadGeneration || !operatorToken) return;
     $("trace-panel").hidden = false;
     $("trace-id").textContent = traceId;
     $("trace-events").innerHTML = events.map(row => '<tr><td>' + escapeHtml((row.created_at || "").replace("T"," ").slice(0,19)) + '</td><td>' + escapeHtml(row.event_type) + '</td><td>' + escapeHtml(row.decision || "—") + '</td><td>' + escapeHtml(row.reason_code || "—") + '</td><td>' + escapeHtml(row.resource_id || "—") + '</td><td>' + escapeHtml(JSON.stringify(row.details || {})) + '</td></tr>').join("") || '<tr><td colspan="6" class="muted">No events for this trace.</td></tr>';
@@ -479,7 +482,7 @@
       window.location.assign(authConfig.cognito.hosted_ui_domain + "/logout?" + query.toString());
       return;
     }
-    setMessage("Signed out. Access tokens are held only in page memory.");
+    setMessage("Disconnected. Access tokens and previously loaded operator data have been cleared.");
   });
   $("nim-form").addEventListener("submit", async event => {
     event.preventDefault();
@@ -566,6 +569,7 @@
   $("run-agent-evaluation").addEventListener("click", async () => {
     const button = $("run-agent-evaluation");
     if (!operatorToken) { setMessage("Sign in before running the evaluation.", true); return; }
+    const generation = loadGeneration;
     button.disabled = true;
     button.textContent = "Running…";
     try {
@@ -573,7 +577,9 @@
         method: "POST",
         body: JSON.stringify({rounds: 3})
       });
+      if (generation !== loadGeneration || !operatorToken) return;
       await load();
+      if (!operatorToken) return;
       setMessage("Hosted NVIDIA NIM evaluation " + result.run_id.slice(0, 12) + "… completed: " +
         result.attacks_prevented + "/" + result.attack_attempts +
         " attacks prevented; success rate " + percent(result.attack_success_rate) + ".");
