@@ -15,6 +15,7 @@ dependencies = []
 dev = ["pytest>=8.0", "PyJWT[crypto]>=2.10", "mcp>=2.2.0,<3", "mangum>=0.22.0", "PyYAML>=6.0", "moto[dynamodb]>=5.2,<6"]
 server = ["fastapi>=0.115", "uvicorn[standard]>=0.30", "PyJWT[crypto]>=2.10", "mcp>=2.2.0,<3", "httpx2>=2.0,<3"]
 aws = ["boto3>=1.44", "mangum>=0.22.0"]
+band-realtime = ["websockets>=14,<17"]
 
 [project.scripts]
 shadow-hunter-api = "shadow_hunter.api:run"
