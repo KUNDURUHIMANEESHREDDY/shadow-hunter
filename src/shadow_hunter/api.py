@@ -40,6 +40,10 @@ from .nim import (
 from .policy import PolicyConfig, PolicyEngine, Principal
 from .settings import IntegrationSecretStore, IntegrationSettingsError
 from .store import SQLiteStore, StoreError
+from .sponsors import (
+    BandDecisionPublisher, LyzrAdvisor,
+    SponsorConfigurationError, SponsorProviderError, sponsor_status,
+)
 
 WEB_ROOT = Path(__file__).parent / "web"
 NIM_EVALUATION_TIMEOUT_BUDGET_SECONDS = 24.0
@@ -292,6 +296,108 @@ def create_app(
             "blue_key_id": key_ids["blue_key_id"],
             "secrets_returned": False,
         }
+
+    @app.get("/v1/operator/sponsors/status")
+    def sponsor_integration_status(
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        operator(authorization)
+        return sponsor_status()
+
+    @app.post("/v1/operator/sponsors/lyzr/advise")
+    def sponsor_lyzr_advice(
+        body: dict[str, Any] = Body(...),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        operator_id = operator(authorization)
+        if set(body) != {"scenario"} or not isinstance(body.get("scenario"), str):
+            raise HTTPException(status_code=422, detail="Only a synthetic scenario is accepted")
+        scenario = body["scenario"]
+        if not 1 <= len(scenario.strip()) <= 1500:
+            raise HTTPException(status_code=422, detail="Scenario must be 1-1500 characters")
+        try:
+            advisor = LyzrAdvisor.from_environment()
+        except SponsorConfigurationError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        trace_id = str(uuid4())
+        try:
+            store.append_audit(
+                event_type="SPONSOR_LYZR_ADVICE_REQUESTED", trace_id=trace_id,
+                request_id=trace_id, actor_id=operator_id, tenant_id="operator",
+                resource_id="lyzr_advisory", details={"scenario_length": len(scenario)},
+            )
+        except StoreError as exc:
+            raise HTTPException(status_code=503, detail="Could not audit sponsor request") from exc
+        try:
+            advice = advisor.advise(scenario)
+        except SponsorConfigurationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except SponsorProviderError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return {
+            "provider": "lyzr", "authority": "advisory_only",
+            "trace_id": trace_id, "advice": advice,
+        }
+
+    @app.post("/v1/operator/sponsors/band/publish-trace")
+    def sponsor_band_publish_trace(
+        body: dict[str, Any] = Body(...),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        operator_id = operator(authorization)
+        if set(body) != {"trace_id"} or not isinstance(body.get("trace_id"), str):
+            raise HTTPException(status_code=422, detail="Only trace_id is accepted")
+        trace_id = body["trace_id"]
+        if not 1 <= len(trace_id) <= 128 or any(
+            char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+            for char in trace_id
+        ):
+            raise HTTPException(status_code=422, detail="Invalid trace ID")
+        try:
+            events = store.get_trace_events(trace_id)
+        except StoreError as exc:
+            raise HTTPException(status_code=503, detail="Could not load audit trace") from exc
+        decisions = [
+            event for event in events
+            if event.get("event_type") == "POLICY_DECISION"
+            and event.get("decision") in {"ALLOW", "DENY", "ESCALATE"}
+        ]
+        if not decisions:
+            raise HTTPException(status_code=404, detail="No audited policy decision for this trace")
+        selected = decisions[-1]
+        decision, reason = selected["decision"], selected.get("reason_code", "")
+        try:
+            publisher = BandDecisionPublisher.from_environment()
+        except SponsorConfigurationError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        try:
+            store.append_audit(
+                event_type="SPONSOR_BAND_PUBLICATION_REQUESTED",
+                trace_id=trace_id, request_id=str(uuid4()), actor_id=operator_id,
+                tenant_id="operator", resource_id="band_collaboration",
+                details={"decision": decision, "reason_code": reason},
+            )
+        except StoreError as exc:
+            raise HTTPException(status_code=503, detail="Could not audit publication request") from exc
+        try:
+            publisher.publish_decision(decision, reason)
+        except SponsorConfigurationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except SponsorProviderError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        try:
+            store.append_audit(
+                event_type="SPONSOR_BAND_SUMMARY_PUBLISHED",
+                trace_id=trace_id, request_id=str(uuid4()), actor_id=operator_id,
+                tenant_id="operator", resource_id="band_collaboration",
+                details={"decision": decision, "reason_code": reason},
+            )
+        except StoreError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="BAND accepted the summary, but audit confirmation failed",
+            ) from exc
+        return {"provider": "band", "published": True, "summary_only": True}
 
     @app.post("/v1/agent/chat")
     def agent_chat(

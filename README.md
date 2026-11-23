@@ -262,3 +262,14 @@ Downloaded skills are untrusted supply-chain inputs. Each skill must be previewe
 ## License
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE).
+
+
+## Diwali Festiverse sponsor adapters (opt-in)
+
+The separate Diwali Festiverse hackathon evaluates sponsor integration.
+Shadow Hunter includes operator-authenticated **Lyzr advisory inference**,
+**BAND redacted policy-decision publication**, a **Finch-ready reviewed
+audit skill package**, and an **AdaL demo-production brief**. They do not
+grant external agents tool execution authority. Provider connectivity,
+Finch publication and exported video are **not yet live-verified**.
+See [Sponsor setup and verification](docs/sponsor-integrations.md).
