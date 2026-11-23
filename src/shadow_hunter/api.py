@@ -29,6 +29,7 @@ from .agents import (
 from .approvals import ApprovalService
 from .auth import build_authenticator_from_environment
 from .gateway import GatewayError, ToolGateway, public_tool_result
+from .evidence import verify_round_evidence
 from .mcp_server import build_mcp_runtime
 from .nim import (
     NIMBlueDefenseReasoner,
@@ -719,6 +720,8 @@ def create_app(
                 )
                 metrics = EvaluationMetrics.from_observations(observations)
                 trace_evidence = []
+                verified_receipts: dict[str, str] = {}
+                scenario_lookup = {item.scenario_id: item for item in strategies.scenarios}
                 safe_detail_keys = {
                     "scenario_id", "strategy_id", "round", "is_attack",
                     "expected_decision", "actual_decision", "expected_reason_code",
@@ -728,8 +731,24 @@ def create_app(
                     "authenticated", "tool_name", "agent_id",
                     "strategy_summary", "strategy_seed", "analysis_summary",
                     "defense_model", "defense_seed",
+                    "evidence_sha256", "verification_method",
                 }
                 for observation in observations:
+                    # Re-check independently at reporting time, after the
+                    # simulation validated the evidence in each round.
+                    scenario = scenario_lookup[observation.scenario_id]
+                    receipt = verify_round_evidence(
+                        evaluation_store, observation,
+                        expected_tool_name=scenario.tool_name,
+                        expected_principal_id=evaluation_principal.subject_id,
+                    )
+                    recorded = [
+                        item for item in evaluation_store.get_trace_events(observation.trace_id)
+                        if item.get("event_type") == "A2A_EVIDENCE_VERIFIED"
+                    ]
+                    if len(recorded) != 1 or recorded[0].get("details") != receipt.to_dict():
+                        raise ValueError("Independent Red/Blue evidence receipt is invalid")
+                    verified_receipts[observation.trace_id] = receipt.semantic_sha256
                     for event in evaluation_store.get_trace_events(observation.trace_id):
                         source_details = event.get("details") or {}
                         trace_evidence.append({
@@ -779,6 +798,8 @@ def create_app(
                 "sandbox": "isolated_synthetic_sqlite",
                 "rounds_requested": rounds,
                 "agent_authentication": "hmac_sha256",
+                "verified_rounds": len(verified_receipts),
+                "evidence_verification": "persisted_a2a_and_policy_v1",
             },
         )
         for trace_event in trace_evidence:
@@ -821,6 +842,8 @@ def create_app(
                 "attack_prevented": observation.attack_prevented,
                 "attack_success": observation.attack_success,
                 "passed": observation.passed,
+                "evidence_verified": True,
+                "evidence_sha256": verified_receipts[observation.trace_id],
             }
             result_rows.append(result)
             store.append_audit(
