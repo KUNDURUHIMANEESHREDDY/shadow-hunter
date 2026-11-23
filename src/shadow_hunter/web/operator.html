@@ -597,6 +597,9 @@
     }
   });
   $("approvals").addEventListener("click", async event => {
+    const sessionToken = operatorToken;
+    if (!sessionToken) return;
+    let actionStatus = "";
     const approveId = event.target.getAttribute("data-approve");
     const rejectId = event.target.getAttribute("data-reject");
     const executeId = event.target.getAttribute("data-execute");
@@ -605,29 +608,36 @@
       if (approveId) {
         const result = await api("/v1/operator/approvals/" + encodeURIComponent(approveId) + "/approve", {method:"POST", body:"{}"});
         const current = (await api("/v1/operator/approvals")).find(item => item.approval_id === approveId);
+        if (sessionToken !== operatorToken) return;
         if (current) approvalTokens.set(current.refund_request_id, result.approval_token);
-        setMessage("Approval granted. One-time capability is available only in this tab until execution.");
+        actionStatus = "Approval granted. One-time capability is available only in this tab until execution.";
       } else if (recoverId) {
         const result = await api(
           "/v1/operator/approvals/" + encodeURIComponent(recoverId) + "/recover-token",
           {method:"POST", body:"{}"}
         );
         const current = (await api("/v1/operator/approvals")).find(item => item.approval_id === recoverId);
+        if (sessionToken !== operatorToken) return;
         if (current) approvalTokens.set(current.refund_request_id, result.approval_token);
-        setMessage("A replacement one-time capability was issued. The previous token is invalidated.");
+        actionStatus = "A replacement one-time capability was issued. The previous token is invalidated.";
       } else if (rejectId) {
         await api("/v1/operator/approvals/" + encodeURIComponent(rejectId) + "/reject", {method:"POST", body:JSON.stringify({reason:"Rejected in operator console"})});
-        setMessage("Approval rejected.");
+        actionStatus = "Approval rejected.";
       } else if (executeId) {
         const token = approvalTokens.get(executeId);
         if (!token) throw new Error("One-time approval capability is not available in this tab.");
         if (!window.confirm("Execute this approved refund? This changes the demo ledger and consumes the one-time approval capability.")) return;
         await api("/v1/operator/refunds/" + encodeURIComponent(executeId) + "/execute", {method:"POST", body:JSON.stringify({approval_token:token})});
         approvalTokens.delete(executeId);
-        setMessage("Refund executed in the local demo ledger. No payment provider was called.");
+        actionStatus = "Refund executed in the local demo ledger. No payment provider was called.";
       }
+      if (sessionToken !== operatorToken) return;
       await load();
-    } catch (error) { setMessage(error.message, true); }
+      // Refreshing the dashboard must not erase the operator's action outcome.
+      if (operatorToken === sessionToken && actionStatus) setMessage(actionStatus);
+    } catch (error) {
+      if (operatorToken === sessionToken) setMessage(error.message, true);
+    }
   });
   $("audit").addEventListener("click", async event => {
     const traceId = event.target.getAttribute("data-trace");
