@@ -162,16 +162,19 @@ class BandDecisionPublisher:
     def publish_decision(self, decision: str, reason_code: str) -> None:
         if decision not in _DECISIONS or not isinstance(reason_code, str) or not _REASON.fullmatch(reason_code):
             raise SponsorConfigurationError("Only validated policy decision metadata may be published")
+        if not self.mention_agent_id:
+            raise SponsorConfigurationError(
+                "BAND_MENTION_AGENT_ID is required to publish a text message"
+            )
         message: dict[str, Any] = {
             "content": (
                 f"Shadow Hunter policy result: {decision} ({reason_code}). "
                 "This is a redacted audit summary for collaboration, NOT an "
                 "authorization grant. All tool calls require independent "
                 "Shadow Hunter policy evaluation."
-            )
+            ),
+            "mentions": [{"id": self.mention_agent_id}],
         }
-        if self.mention_agent_id:
-            message["mentions"] = [{"id": self.mention_agent_id}]
         _post_json(
             f"{BAND_BASE}/api/v1/agent/chats/{self.chat_id}/messages",
             "X-API-Key",
