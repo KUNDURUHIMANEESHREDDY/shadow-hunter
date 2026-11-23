@@ -69,8 +69,16 @@ def _stack_outputs(cf: object, stack_name: str) -> dict[str, str]:
 def _inspect_identity(idp: object, outputs: Mapping[str, str], region: str) -> dict:
     pool = idp.describe_user_pool(UserPoolId=outputs["UserPoolId"])["UserPool"]
     _require(pool.get("MfaConfiguration") == "ON", "Mandatory MFA is not enabled")
-    _require("SOFTWARE_TOKEN_MFA" in pool.get("EnabledMfas", []),
-             "TOTP MFA not enabled")
+    # DescribeUserPool may omit EnabledMfas even when TOTP is enabled.
+    # GetUserPoolMfaConfig is the authoritative MFA-factor configuration API.
+    mfa = idp.get_user_pool_mfa_config(UserPoolId=outputs["UserPoolId"])
+    software_token = mfa.get("SoftwareTokenMfaConfiguration")
+    _require(
+        mfa.get("MfaConfiguration") == "ON"
+        and isinstance(software_token, Mapping)
+        and software_token.get("Enabled") is True,
+        "TOTP MFA not enabled",
+    )
     trigger = pool.get("LambdaConfig", {}).get("PreTokenGenerationConfig", {})
     _require(trigger.get("LambdaVersion") == "V3_0", "Pre-token trigger is not V3_0")
     _require(pool.get("DeletionProtection") == "ACTIVE", "User pool deletion protection off")
