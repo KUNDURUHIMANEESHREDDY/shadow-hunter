@@ -20,6 +20,15 @@ Parameters:
     MinLength: 1
     MaxLength: 128
     AllowedPattern: '^[a-zA-Z0-9]+$'
+  HarnessGatewayOauthProviderArn:
+    Type: String
+    Description: Approved user-delegated OBO provider for Harness-to-Gateway JWT authentication
+    AllowedPattern: '^arn:aws:bedrock-agentcore:ap-southeast-2:[0-9]{12}:token-vault/.+$'
+  HarnessGatewayOauthScope:
+    Type: String
+    Description: OAuth scope for the protected Gateway; must be authorized for this subject
+    MinLength: 3
+    MaxLength: 256
   ApprovedModelId:
     Type: String
     Description: Bedrock model ID approved for this account, Region, and spending limit
@@ -57,7 +66,11 @@ Resources:
             AgentCoreGateway:
               GatewayArn: !Ref GovernedGatewayArn
               OutboundAuth:
-                AwsIam: {}
+                Oauth:
+                  ProviderArn: !Ref HarnessGatewayOauthProviderArn
+                  GrantType: TOKEN_EXCHANGE
+                  Scopes:
+                    - !Ref HarnessGatewayOauthScope
       AllowedTools:
         - '@shadow-hunter-refunds/*'
       MaxIterations: 4

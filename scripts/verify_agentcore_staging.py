@@ -61,12 +61,31 @@ def verify(control, expected: Expected) -> list[str]:
 
     gateway_arn = gateway.get("gatewayArn")
     harness_tools = harness.get("tools") or []
-    if not any(
-        item.get("type") == "agentcore_gateway"
-        and item.get("config", {}).get("agentCoreGateway", {}).get("gatewayArn") == gateway_arn
+    matching_tools = [
+        item.get("config", {}).get("agentCoreGateway", {})
         for item in harness_tools
-    ):
-        errors.append("Harness does not use the governed Gateway")
+        if item.get("type") == "agentcore_gateway"
+        and item.get("config", {}).get("agentCoreGateway", {}).get("gatewayArn") == gateway_arn
+    ]
+    if len(matching_tools) != 1:
+        errors.append("Harness must use exactly one governed Gateway tool")
+    else:
+        # SigV4 (the default Harness outbound auth) is not an OAuth JWT.
+        # CUSTOM_JWT Gateway inbound auth must receive a bearer token. The
+        # real user/actor/scopes still need a separate live OBO proof.
+        outbound = matching_tools[0].get("outboundAuth") or {"awsIam": {}}
+        if gateway.get("authorizerType") == "CUSTOM_JWT":
+            oauth = outbound.get("oauth") if isinstance(outbound, dict) else None
+            if not isinstance(oauth, dict):
+                errors.append("Harness AWS_IAM cannot authenticate to a CUSTOM_JWT Gateway")
+            elif (
+                oauth.get("grantType") != "TOKEN_EXCHANGE"
+                or not isinstance(oauth.get("providerArn"), str)
+                or not oauth["providerArn"].startswith("arn:")
+                or not isinstance(oauth.get("scopes"), list)
+                or not oauth["scopes"]
+            ):
+                errors.append("Harness Gateway OAuth must use a scoped TOKEN_EXCHANGE provider")
 
     if target.get("status") != "READY":
         errors.append("Gateway target is not READY")

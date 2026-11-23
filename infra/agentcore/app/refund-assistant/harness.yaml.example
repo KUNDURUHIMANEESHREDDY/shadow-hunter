@@ -31,7 +31,11 @@ tools:
       agentCoreGateway:
         gatewayArn: REPLACE_WITH_GOVERNED_GATEWAY_ARN
         outboundAuth:
-          awsIam: {}
+          oauth:
+            providerArn: REPLACE_WITH_GATEWAY_OBO_CREDENTIAL_PROVIDER_ARN
+            grantType: TOKEN_EXCHANGE
+            scopes:
+              - REPLACE_WITH_GATEWAY_ACCESS_SCOPE
 allowedTools:
   - "@shadow-hunter-refunds/*"
 maxIterations: 8

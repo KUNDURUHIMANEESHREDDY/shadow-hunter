@@ -28,7 +28,14 @@ class FakeControl:
             },
             "tools": [{
                 "type": "agentcore_gateway",
-                "config": {"agentCoreGateway": {"gatewayArn": "arn:example:gateway"}}
+                "config": {"agentCoreGateway": {
+                    "gatewayArn": "arn:example:gateway",
+                    "outboundAuth": {"oauth": {
+                        "providerArn": "arn:example:gateway-obo",
+                        "grantType": "TOKEN_EXCHANGE",
+                        "scopes": ["shadow-hunter/customer"]
+                    }}
+                }}
             }]
         }
         self.gateway = {
@@ -124,3 +131,29 @@ def test_gateway_mcp_requires_nonempty_openapi_schema():
     fake = FakeControl()
     fake.target["targetConfiguration"] = {"mcp": {"openApiSchema": {}}}
     assert any("MCP OpenAPI" in message for message in verify(fake, EXPECTED))
+
+def test_harness_sigv4_cannot_authenticate_to_jwt_gateway():
+    fake = FakeControl()
+    gateway_config = fake.harness["tools"][0]["config"]["agentCoreGateway"]
+    gateway_config["outboundAuth"] = {"awsIam": {}}
+    assert any("AWS_IAM cannot authenticate" in item for item in verify(fake, EXPECTED))
+
+
+def test_harness_default_iam_cannot_authenticate_to_jwt_gateway():
+    fake = FakeControl()
+    del fake.harness["tools"][0]["config"]["agentCoreGateway"]["outboundAuth"]
+    assert any("AWS_IAM cannot authenticate" in item for item in verify(fake, EXPECTED))
+
+
+def test_harness_oauth_requires_scoped_token_exchange():
+    fake = FakeControl()
+    oauth = fake.harness["tools"][0]["config"]["agentCoreGateway"]["outboundAuth"]["oauth"]
+    oauth["grantType"] = "CLIENT_CREDENTIALS"
+    assert any("scoped TOKEN_EXCHANGE" in item for item in verify(fake, EXPECTED))
+
+
+def test_harness_oauth_empty_scopes_are_rejected():
+    fake = FakeControl()
+    oauth = fake.harness["tools"][0]["config"]["agentCoreGateway"]["outboundAuth"]["oauth"]
+    oauth["scopes"] = []
+    assert any("scoped TOKEN_EXCHANGE" in item for item in verify(fake, EXPECTED))

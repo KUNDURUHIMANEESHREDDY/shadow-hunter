@@ -19,9 +19,15 @@ The intended identity chain is:
 3. The Harness validates the JWT using its `CUSTOM_JWT` authorizer. AgentCore
    Identity can then carry the inbound user identity through downstream tool
    calls. The checked-in Harness template includes the authorizer.
-4. The Harness calls the governed Gateway using the Harness execution role
-   (`outboundAuth.awsIam`). This authenticates the Harness-to-Gateway service
-   hop; it is not the user-delegation mechanism for the Gateway's API target.
+4. The planned Gateway uses CUSTOM_JWT inbound authorization. A Harness
+   configured with `outboundAuth.awsIam` (SigV4) cannot authenticate to
+   that JWT-only Gateway. The staging Harness now requires a separately
+   reviewed `outboundAuth.oauth` TOKEN_EXCHANGE provider and a scoped
+   bearer token for the Harness-to-Gateway hop. This first delegated token
+   must satisfy the Gateway's exact issuer/client/scope requirements.
+   **This two-hop delegation is a release blocker until proven live.**
+   Switching the Gateway to AWS_IAM without an inbound user JWT does not
+   solve the next delegated exchange to the refund API.
 5. Configure the Gateway OpenAPI target with OAuth
    `TOKEN_EXCHANGE` using an AgentCore Identity credential provider backed by
    Cognito. The Gateway exchanges the inbound user access token for a
