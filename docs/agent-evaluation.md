@@ -246,3 +246,63 @@ on port 8000. No `.env` or credential file was opened, no secret values were
 read or requested, and no NVIDIA request or AWS operation was made. The next
 verification step remains a credentialed one-round hosted call followed by
 the three-round hosted evaluation.
+
+
+## Independent evidence verification and reproducible local harness (23 November 2026)
+
+Every `RedBlueSimulation.run` now verifies a round **after** the actual
+`ToolGateway` decision is written, before returning an observation or
+counting it toward evaluation metrics. The verifier checks:
+
+- exactly one persisted gateway `POLICY_DECISION` per correlated proposal;
+- exactly two Red/Blue `A2A_MESSAGE_SENT` events and one authenticated
+  `A2A_MESSAGE_RECEIVED`, with expected senders, recipients, message IDs and
+  key references;
+- the trusted principal, gateway tool name, decision, reason and policy
+  provenance match the Red/Blue outcome;
+- the independently recorded `A2A_EVALUATION` agrees with the actual gateway
+  decision, scenario and round;
+- no execution event for a refund appears within the test trace.
+
+Missing, conflicting or duplicate evidence fails the run closed. Successfully
+verified rounds produce an `A2A_EVIDENCE_VERIFIED` event and a SHA-256 digest
+over a canonical **semantic** proof excluding UUIDs, timestamps, signatures,
+tokens and other secrets. These checks establish **consistency of locally
+recorded A2A and gateway evidence**, not external log immutability or hosted
+model correctness.
+
+The operator dashboard displays `Verified audit · <12 hex characters>` for
+results that carry a valid 64-hex-character independently recorded digest.
+Otherwise, it shows `Not independently verified`. Hosted-model evaluations
+include the number of verified rounds, with details copied from the disposable
+synthetic sandbox into the operator audit history.
+
+### Run reproducible local security evaluation
+
+```sh
+python scripts/run_red_blue_synthetic.py --rounds 8 --output artifacts/red-blue-evaluation.json
+python scripts/run_red_blue_synthetic.py --rounds 8 --output artifacts/red-blue-evaluation-repeat.json
+cmp artifacts/red-blue-evaluation.json artifacts/red-blue-evaluation-repeat.json
+```
+
+This exercise uses real policy and signed A2A logic, isolated SQLite synthetic
+orders, random ephemeral HMAC keys, and the deterministic strategy/defense
+reasoners. It does **not** contact AWS, NVIDIA, Lyzr, BAND or any real customer
+system. The report records the scenario catalogue digest, per-round semantic
+audit digests, metrics, actual/expected decisions, and the no-refund-execution
+invariant. It deliberately marks `hosted_model_used: false` and
+`hosted_model_verified: false`.
+
+GitHub Actions runs the 8-round synthetic evaluation twice, compares the JSON
+files byte for byte, and uploads the redacted report as
+`shadow-hunter-red-blue-evidence`. Browser tests independently check that
+verification labels are rendered safely.
+
+### Still outstanding
+
+A credentialed NVIDIA Red/Blue inference evaluation with genuinely separate
+hosted models remains a separate release gate. The local deterministic
+evaluation is a **reproducible policy-safety regression**, not a substitute
+for measured hosted agent quality. A separate immutable audit archive or
+hardware-backed identity check is also needed before claiming external
+independent security attestation.
