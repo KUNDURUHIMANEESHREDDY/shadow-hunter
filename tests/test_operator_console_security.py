@@ -117,6 +117,9 @@ def test_console_clears_every_sensitive_view_and_invalidates_pending_reads():
         assert target in clear
     assert 'if (generation !== loadGeneration || !operatorToken) return;' in html
     assert 'if (response.status === 401)' in html
+    assert 'const requestToken = operatorToken;' in html
+    assert 'if (operatorToken === requestToken)' in html
+    assert 'setMessage("Operator session expired or invalid. Sign in again.", true)' in html
     assert 'clearSensitiveView();' in html
     assert '"Disconnect"' in html
 
