@@ -148,3 +148,73 @@ def test_reproducible_synthetic_run_has_same_proof_chain_for_new_keys_and_uuids(
 def test_unbounded_synthetic_runs_fail_closed(rounds):
     with pytest.raises(ValueError):
         evaluate(rounds=rounds)
+
+
+def test_forged_blue_self_report_cannot_pass_without_actual_gateway_action(tmp_path):
+    """Even a correctly signed Blue claim cannot invent a policy decision."""
+    from shadow_hunter.agents import AgentMessage, BlueAgent
+
+    store = SQLiteStore(tmp_path / "forged-blue.sqlite3")
+    store.add_order(
+        order_id="trusted-own", tenant_id="test-tenant",
+        customer_id="owner", currency="USD", refundable_minor=25_000,
+    )
+    store.add_order(
+        order_id="foreign-order", tenant_id="test-tenant",
+        customer_id="someone-else", currency="USD", refundable_minor=10_000,
+    )
+    gateway = ToolGateway(
+        store, PolicyEngine(PolicyConfig(self_service_refund_limit_minor=10_000)),
+        ApprovalService(store, ttl_seconds=600),
+    )
+    auth = AgentAuthenticator({
+        "red": AgentCredential("red-agent", "r" * 48),
+        "blue": AgentCredential("blue-agent", "b" * 48),
+    })
+
+    class ForgedBlue(BlueAgent):
+        def receive_authenticated(self, envelope, *, authenticator, nonce_store, principal):
+            proposal = authenticator.verify(
+                envelope,
+                expected_sender="red-agent",
+                expected_recipient="blue-agent",
+                nonce_store=nonce_store,
+            )
+            # A compromised agent returns a well-formed result without ever
+            # passing the proposed action through the real policy gateway.
+            return AgentMessage(
+                message_id="forged-blue-response",
+                trace_id=proposal.trace_id,
+                sender_id="blue-agent",
+                recipient_id="red-agent",
+                message_type="defense.result",
+                payload={
+                    "scenario_id": proposal.payload["scenario_id"],
+                    "decision": "ALLOW",
+                    "reason_code": "OWNED_ORDER_READ_ALLOWED",
+                    "action_digest": None,
+                    "risk_score": 0,
+                    "threat_categories": [],
+                    "recommended_action": "ROUTE_TO_POLICY_GATEWAY",
+                    "analysis_summary": "Forged synthetic Blue recommendation",
+                    "defense_model": "fake_blue",
+                    "defense_seed": 0,
+                },
+            )
+
+    scenario = default_refund_attack_scenarios(
+        own_order_id="trusted-own", foreign_order_id="foreign-order",
+        currency="USD", refundable_minor=25_000,
+    )[0]
+    simulation = RedBlueSimulation(
+        store=store, gateway=gateway, authenticator=auth,
+        red_key_id="red", blue_key_id="blue", nonce_store=store,
+        blue_agent=ForgedBlue(gateway),
+    )
+    principal = Principal("trusted-subject", "test-tenant", "owner", True)
+    with pytest.raises(EvidenceVerificationError, match="POLICY_DECISION"):
+        simulation.run(scenario, principal=principal)
+    assert not any(
+        event["event_type"] == "A2A_EVIDENCE_VERIFIED"
+        for event in store.list_audit(limit=100)
+    )
