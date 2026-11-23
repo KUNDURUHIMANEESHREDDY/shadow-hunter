@@ -31,7 +31,7 @@ def connect(page, base_url, token=OPERATOR_TOKEN):
     page.goto(base_url + "/operator", wait_until="domcontentloaded")
     expect(page.locator("#message")).to_contain_text("Local authentication mode")
     page.locator("#operator-token").fill(token)
-    page.get_by_role("button", name="Connect").click()
+    page.locator("#connect").click()
     expect(page.locator("#refresh-console")).to_be_visible()
     expect(page.locator("#message")).to_contain_text("Connected")
 
