@@ -768,6 +768,8 @@ def create_app(
                                 if key in source_details
                             },
                         })
+                if evaluation_store.overview()["executed_refunds"] != 0:
+                    raise ValueError("Evaluation sandbox must not execute refunds")
         except (
             A2AProtocolError,
             A2AConfigurationError,
@@ -857,7 +859,7 @@ def create_app(
                 resource_id=observation.scenario_id,
                 details=result,
             )
-        return {"run_id": run_id, **summary, "results": result_rows}
+        return {"run_id": run_id, "verified_rounds": len(verified_receipts), **summary, "results": result_rows}
 
     @app.get("/v1/operator/agent-evaluations/latest")
     def latest_agent_evaluation(
