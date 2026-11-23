@@ -42,7 +42,8 @@ def _require(condition: bool, message: str) -> None:
 def _totp(secret: str, clock: float | None = None) -> str:
     """RFC 6238 SHA-1 six-digit TOTP for ephemeral staging test accounts."""
     position = int((time.time() if clock is None else clock) // 30)
-    key = base64.b32decode(secret.upper(), casefold=True)
+    normalized = secret.strip().upper()
+    key = base64.b32decode(normalized + "=" * (-len(normalized) % 8), casefold=True)
     digest = hmac.new(key, position.to_bytes(8, "big"), hashlib.sha1).digest()
     offset = digest[-1] & 0x0F
     code = int.from_bytes(digest[offset:offset + 4], "big") & 0x7FFFFFFF
