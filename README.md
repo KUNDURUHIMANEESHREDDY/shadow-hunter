@@ -113,7 +113,9 @@ These are system requirements, not claims that the current repository already sa
 - **Full regression:** 228 Python tests passed on merged `main` at `fa64c68` (including concurrent Cognito/AgentCore test additions); repository validator and git diff checks passed. The pre-merge security branch had 201 passing tests and compileall success.
 - **Static/dependency checks:** Bandit medium/high scan exit 0; pip-audit on `src/requirements.txt` returned no known vulnerabilities (exit 0).
 - **Live staging unauthenticated checks:** `GET /prod/health` returned 200 with anti-framing/nosniff headers; operator audit/approvals and customer agent tool/chat endpoints returned 401 without bearer tokens.
-- **Not finished:** AWS CLI session expired before full staging audit key/byte verification. No real two-tenant Cognito/OBO tokens, authenticated staging cross-tenant matrix or independent penetration test evidence is available. Production remains **NO-GO**. See [verification report](docs/cycles/2026-11-23-security-validation.md).
+- **Live staging AWS audit verification:** After reauthentication, the full audit gate passed: **3 DynamoDB audit records / 3 S3 objects, exact bytes matching, no missing/orphan/duplicate/mismatched records**. S3 Object Lock GOVERNANCE (one-day staging retention), bucket versioning and all public-access blocks were verified.
+- **Live Cognito configuration:** Dedicated MFA API confirms MFA ON and TOTP enabled. The updated Cognito smoke runner passes live read-only pool/client inspection; 14 focused local smoke tests pass. An earlier missing `DescribeUserPool.EnabledMfas` field was a verifier false positive.
+- **Still pending:** Actual synthetic customer/operator MFA sign-ins, scoped OBO tokens, authenticated two-tenant staging checks and full live penetration testing. The remote desktop tool reached its usage limit before running `--mfa`. Production remains **NO-GO**. See the [live verification record](docs/cycles/2026-11-23-live-aws-security-verification.md) and [earlier test matrix](docs/cycles/2026-11-23-security-validation.md).
 
 ## Production acceptance criteria
 
