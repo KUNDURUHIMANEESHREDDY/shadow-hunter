@@ -46,7 +46,7 @@ class FakeControl:
             "status": "READY", "credentialProviderArn": "arn:example:oauth"
         }
         self.target = {
-            "status": "READY", "targetConfiguration": {"http": {"openApiSchema": {}}},
+            "status": "READY", "targetConfiguration": {"mcp": {"openApiSchema": {"inlinePayload": "openapi: 3.0.3"}}},
             "credentialProviderConfigurations": [{
                 "credentialProviderType": "OAUTH",
                 "credentialProvider": {
@@ -113,3 +113,14 @@ def test_wrong_gateway_or_oauth_provider_is_rejected():
     issues = verify(fake, EXPECTED)
     assert any("governed Gateway" in issue for issue in issues)
     assert any("expected OBO" in issue for issue in issues)
+
+def test_gateway_http_passthrough_cannot_substitute_for_openapi_tool():
+    fake = FakeControl()
+    fake.target["targetConfiguration"] = {"http": {"passthrough": {"url": "https://example.org"}}}
+    assert any("MCP OpenAPI" in message for message in verify(fake, EXPECTED))
+
+
+def test_gateway_mcp_requires_nonempty_openapi_schema():
+    fake = FakeControl()
+    fake.target["targetConfiguration"] = {"mcp": {"openApiSchema": {}}}
+    assert any("MCP OpenAPI" in message for message in verify(fake, EXPECTED))

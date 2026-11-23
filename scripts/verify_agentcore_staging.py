@@ -70,8 +70,12 @@ def verify(control, expected: Expected) -> list[str]:
 
     if target.get("status") != "READY":
         errors.append("Gateway target is not READY")
-    if not (target.get("targetConfiguration") or {}).get("http"):
-        errors.append("Gateway target does not use the configured HTTP OpenAPI interface")
+    # The OpenAPI target is exposed as an MCP gateway tool, not an HTTP
+    # passthrough. Accepting `http` here would falsely certify an unrelated
+    # target that cannot provide the governed refund tools.
+    mcp_target = (target.get("targetConfiguration") or {}).get("mcp") or {}
+    if not mcp_target.get("openApiSchema"):
+        errors.append("Gateway target must provide the governed MCP OpenAPI schema")
     oauth_arn = provider.get("credentialProviderArn")
     if provider.get("status") != "READY" or not oauth_arn:
         errors.append("AgentCore Identity credential provider is not READY")

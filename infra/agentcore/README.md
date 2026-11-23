@@ -169,3 +169,45 @@ examples, not deployed resources.
   https://docs.aws.amazon.com/bedrock/latest/userguide/agents-classic-maintenance-mode.html
 - Hackathon:
   https://builder.aws.com/build/hackathons/61c39fba-1383-37e7-bd5c-3f9d889d89fc/agents-your-rules-bedrock-managed-agents-build
+
+## Staging Harness CloudFormation template (23 November 2026)
+
+The new `harness-staging.yaml` defines the managed Harness **only**. The
+Gateway, Policy Engine in ENFORCE mode, approved least-privilege execution
+role, protected OpenAPI target and Identity OBO credential provider must
+exist and pass `scripts/verify_agentcore_staging.py` before this stack
+can be considered usable. Supplying an arbitrary gateway ARN is **not**
+proof of policy enforcement.
+
+Review the parameters for the approved Sydney account and Region:
+`HarnessExecutionRoleArn`, `GovernedGatewayArn`,
+`CustomerDiscoveryUrl`, `CustomerClientId`, and `ApprovedModelId`.
+No default model or execution role is selected to avoid silent provider
+charges or privileges. The template limits iterations to four, model
+tokens to 800 per call, total output tokens to 1600 and invocation
+duration to 45 seconds. These are not spending caps.
+
+Non-mutating local validation:
+
+```sh
+cfn-lint infra/agentcore/harness-staging.yaml
+python -m pytest -q tests/test_agentcore_staging_control.py tests/test_verify_harness_tool_e2e.py
+python scripts/preflight_agentcore_staging.py
+```
+
+The mandatory budget/verified alert subscriber gate currently fails.
+Do not create a CloudFormation change set, deploy this template or invoke
+hosted inference until the organization administrator has approved the
+CloudFormation path, the AWS account owner has approved concrete costs
+and model quotas, and independent provider-spend limits and a kill switch
+have been reviewed. AWS Budgets alerts do not prevent charges.
+
+After authorized infrastructure deployment, run the control-plane verifier
+with actual resource IDs and **then**, with short-lived synthetic Cognito JWTs
+and a synthetic order, run `verify_harness_tool_e2e.py --invoke-model`.
+The evidence checker now requires the exact order resource ID, versioned
+policy allow receipt, and no observed tool failures or refund execution.
+The Harness-to-Gateway-to-API trace propagation still needs genuine live
+verification: the API will generate a distinct trace ID if the gateway
+does not pass one. Never replace missing correlated audit evidence with
+a model assertion.

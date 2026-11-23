@@ -26,6 +26,7 @@ jobs:
         run: |
           python -m pip install 'cfn-lint>=1,<2'
           cfn-lint infra/budgets/staging-budget.yaml
+          cfn-lint infra/agentcore/harness-staging.yaml
       - name: Compile source and tests
         run: python -m compileall -q src/shadow_hunter tests
       - name: Keyless AWS and Cognito authentication contract gate

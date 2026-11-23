@@ -45,8 +45,17 @@ def verify(sender, customer_token: str, operator_token: str, order_id: str) -> l
         return ["Harness did not return structured trace evidence"]
     if not isinstance(trace_id, str) or not 1 <= len(trace_id) <= 128 or not trace_id.replace("-", "").replace("_", "").isalnum():
         return ["Harness returned an invalid trace identifier"]
-    if activity.get("observed_tool_uses", 0) < 1 or activity.get("observed_tool_results", 0) < 1:
-        return ["Harness did not report a tool-use and tool-result pair"]
+    if not isinstance(activity, dict):
+        return ["Harness tool evidence is malformed"]
+    uses = activity.get("observed_tool_uses")
+    results = activity.get("observed_tool_results")
+    errors = activity.get("observed_tool_errors", 0)
+    if (
+        type(uses) is not int or type(results) is not int
+        or type(errors) is not int or not 1 <= uses <= 8
+        or not 1 <= results <= uses or errors != 0
+    ):
+        return ["Harness did not report a valid successful tool-use and tool-result pair"]
     audit = sender(STAGING_BASE, "GET", "/v1/operator/audit/trace/" + trace_id, token=operator_token)
     if audit.status != 200:
         return ["Operator audit trace was unavailable"]
@@ -58,11 +67,27 @@ def verify(sender, customer_token: str, operator_token: str, order_id: str) -> l
         isinstance(event, dict)
         and event.get("event_type") == "POLICY_DECISION"
         and event.get("decision") == "ALLOW"
+        and event.get("resource_id") == order_id
+        and isinstance(event.get("policy_id"), str) and bool(event["policy_id"])
+        and isinstance(event.get("policy_version"), str) and bool(event["policy_version"])
         and isinstance(event.get("details"), dict)
         and event["details"].get("tool_name") == "get_order"
         for event in events
     ):
-        failures.append("No matching application policy ALLOW event for governed get_order")
+        failures.append("No matching policy ALLOW receipt for this exact synthetic order")
+    if isinstance(events, list) and any(
+        isinstance(event, dict)
+        and (
+            event.get("event_type", "").startswith("REFUND_EXECUT")
+            or (
+                event.get("event_type") == "POLICY_DECISION"
+                and isinstance(event.get("details"), dict)
+                and event["details"].get("tool_name") == "create_refund_request"
+            )
+        )
+        for event in events
+    ):
+        failures.append("Unexpected refund action occurred in read-only tool proof")
     return failures
 
 
