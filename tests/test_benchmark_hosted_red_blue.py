@@ -156,3 +156,29 @@ def test_hosted_benchmark_rejects_missing_run_level_attestation():
     events[0]["details"]["verified_rounds"] = 0
     with pytest.raises(ValueError, match="does not attest verified rounds"):
         b.analyze_hosted_result(data, events, expected_rounds=3)
+
+
+
+def test_hosted_benchmark_retries_until_complete_gateway_proof_arrives():
+    data = payload()
+    seen = []
+    pauses = []
+
+    def send(path, token, *, method="GET", payload=None):
+        assert token == "synthetic-test-token"
+        if path.endswith("/run"):
+            return Response(200, json.dumps(data).encode())
+        seen.append(path)
+        events = audit(data)
+        if len(seen) == 1:
+            events = events[:1]  # Run summary exists, cases not yet visible.
+        return Response(200, json.dumps(events).encode())
+
+    result = b.run_benchmark(
+        send, "synthetic-test-token", rounds=3,
+        pause=pauses.append,
+        clock=lambda: 15.0,
+    )
+    assert result["verified_rounds"] == 3
+    assert len(seen) == 2
+    assert pauses == [0.4]
