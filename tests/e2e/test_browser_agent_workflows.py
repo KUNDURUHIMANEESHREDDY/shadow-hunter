@@ -198,3 +198,63 @@ def test_browser_sponsor_forms_send_only_fixed_synthetic_data(page, local_server
     page.locator("#publish-band").click()
     expect(page.locator("#message")).to_contain_text("Redacted policy verdict published")
     assert requests[1] == ("band", {"trace_id": "e2e-synthetic-trace"})
+
+
+
+def test_browser_evaluation_marks_only_valid_gateway_evidence_receipts(page, local_server):
+    """UI shows persisted-proof status without treating model prose as authority."""
+    proof = "a" * 64
+
+    def latest_evaluation(route):
+        route.fulfill(json={
+            "run": {
+                "details": {
+                    "attack_attempts": 2,
+                    "attack_success_rate": 0,
+                    "defensive_effectiveness": 1,
+                    "false_denial_rate": 0,
+                    "policy_decision_accuracy": 1,
+                    "verified_rounds": 1,
+                }
+            },
+            "results": [
+                {
+                    "decision": "DENY",
+                    "details": {
+                        "round": 1,
+                        "scenario_id": "synthetic-a",
+                        "strategy_id": "ownership_probe",
+                        "risk_score": 90,
+                        "threat_categories": ["unauthorized_resource_access"],
+                        "analysis_summary": '<svg onload="window.__unsafe=true"></svg>',
+                        "passed": True,
+                        "is_attack": True,
+                        "attack_success": False,
+                        "evidence_verified": True,
+                        "evidence_sha256": proof,
+                    },
+                },
+                {
+                    "decision": "DENY",
+                    "details": {
+                        "round": 2,
+                        "scenario_id": "synthetic-b",
+                        "strategy_id": "unknown_tool",
+                        "passed": True,
+                        "is_attack": True,
+                        "attack_success": False,
+                        "evidence_verified": True,
+                        "evidence_sha256": "not-a-valid-proof",
+                    },
+                },
+            ],
+        })
+
+    page.route("**/v1/operator/agent-evaluations/latest", latest_evaluation)
+    connect(page, local_server)
+    table = page.locator("#agent-eval-results")
+    expect(table.locator("tr")).to_have_count(2)
+    expect(table.locator("tr").nth(0)).to_contain_text("Verified audit · " + proof[:12])
+    expect(table.locator("tr").nth(1)).to_contain_text("Not independently verified")
+    assert table.locator("svg").count() == 0
+    assert page.evaluate("() => !!window.__unsafe") is False

@@ -18,6 +18,7 @@ from typing import Any
 from uuid import uuid4
 
 from .gateway import ToolGateway
+from .evidence import verify_round_evidence
 from .policy import Decision, PolicyEngine, Principal
 from .store import SQLiteStore
 
@@ -1103,6 +1104,27 @@ class RedBlueSimulation:
                 "threat_categories": list(observation.threat_categories),
                 "recommended_action": observation.recommended_action,
             },
+        )
+        # An independent auditor reconciles the actual persisted gateway
+        # decision with the signed A2A events *before* this round is counted.
+        # Neither Red nor Blue may certify its own outcome.
+        receipt = verify_round_evidence(
+            self.store, observation,
+            expected_tool_name=scenario.tool_name,
+            expected_principal_id=principal.subject_id,
+        )
+        self.store.append_audit(
+            event_type="A2A_EVIDENCE_VERIFIED",
+            trace_id=proposal.trace_id,
+            request_id=proposal.message_id,
+            decision=observation.decision.value,
+            reason_code=observation.reason_code,
+            actor_id="independent-evidence-verifier",
+            tenant_id=principal.tenant_id,
+            resource_id=scenario.scenario_id,
+            policy_id=receipt.policy_id,
+            policy_version=receipt.policy_version,
+            details=receipt.to_dict(),
         )
         return observation
 
