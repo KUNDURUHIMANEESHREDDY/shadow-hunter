@@ -24,6 +24,11 @@ jobs:
           python -m pip install -e ".[dev]" fastapi uvicorn httpx
       - name: Compile source and tests
         run: python -m compileall -q src/shadow_hunter tests
+      - name: Security and recovery fault-injection gate
+        env:
+          AWS_EC2_METADATA_DISABLED: "true"
+          SHADOW_HUNTER_HARNESS_ARN: ""
+        run: python -m pytest -q tests/test_security_recovery_e2e.py tests/test_agentcore_recovery.py
       - name: Test sponsor boundaries and regression suite
         run: python -m pytest -q
       - name: Validate tracked repository files
