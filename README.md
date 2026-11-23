@@ -143,9 +143,13 @@ Three separately committed release-gate improvements are available on `main`:
 
 **AWS preflight:** the read-only staging preflight confirmed all three
 CloudFormation stacks, Cognito MFA/delegation requirements and AgentCore
-control-plane access. It **blocked** on an AWS cost budget with a notification
-subscriber. Budgets are not spending caps; usage controls and explicit
-authorization are required before billable deployment.
+control-plane access. The AWS account has **zero AWS budgets**; a dedicated
+staging cost-alert CloudFormation template is prepared, but **not deployed**.
+Organization policy explicitly denied AWS `cloudformation:ValidateTemplate`
+on the authorized session; no bypass was attempted. Offline CloudFormation
+lint and regression tests passed. Budget alert subscriber email confirmation
+and separate spending controls remain mandatory before billable deployment.
+See the [staging budget release gate](docs/cycles/2026-11-23-staging-budget-control.md).
 
 **Decision: production NO-GO.** Successful local tests and UI E2E do not
 replace the managed Harness/Gateway/Policy deployment, genuine Cognito

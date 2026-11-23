@@ -58,3 +58,20 @@ authorized cross-tenant access depend on deployed infrastructure.
 
 No production readiness or independent penetration-testing certification
 is claimed.
+
+## Staging cost-control preflight update (23 November 2026)
+
+Source commit `399f4f0` added a bounded monthly AWS Budgets template,
+strict dedicated-budget release gate, Python tests, and CloudFormation
+linting to the `main` CI pipeline. The AWS account currently has no budgets.
+The existing assumed role was explicitly denied the read-only
+`cloudformation:ValidateTemplate` operation by an AWS Organizations SCP.
+Do not route around this policy.
+
+The new template has passed offline `cfn-lint`, but is **not deployed**.
+Configured email alerts are not necessarily verified/deliverable: the
+recipient must complete AWS verification. Production remains **NO-GO**,
+and billable AgentCore deployment remains blocked until authorized cost
+controls and the live identity/policy/security gates are complete.
+
+See [staging budget gate](2026-11-23-staging-budget-control.md).

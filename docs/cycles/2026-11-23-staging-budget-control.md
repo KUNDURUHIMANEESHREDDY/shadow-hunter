@@ -74,3 +74,26 @@ No production resources or hosted models were used to validate this template.
 
 AWS reference:
 https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-budgets-budget.html
+
+## Actual verification — 23 November 2026
+
+- AWS Budgets `DescribeBudgets` completed successfully: **0 budgets**.
+- `cloudformation:ValidateTemplate` was attempted *read-only* on the
+  authorized connected computer and was rejected with **AccessDenied —
+  explicit Deny from an AWS Organizations service control policy**.
+  This is a governance boundary, not a reason to try another account or
+  alternate API. An authorized organization administrator must approve any
+  required policy change; account-level permission alone is insufficient.
+- Local `tests/test_agentcore_preflight.py`: **5 passed**.
+- GitHub Actions run
+  [45175665995](https://github.com/KUNDURUHIMANEESHREDDY/shadow-hunter/actions/runs/45175665995)
+  passed: `cfn-lint 1.61.0` accepted the template, Python suite
+  **352 passed, 1 skipped**, and real Chromium browser tests passed.
+- The template has **not** been deployed, no notification recipient has
+  been selected or verified, and no AgentCore resources have been created.
+
+The next authorized step is to obtain an explicit recipient and maximum
+monthly budget amount, confirm an organization-approved CloudFormation
+execution path, create the budget through that approved workflow, and
+verify the recipient's email subscription. No changes to organization
+policies, budget resources, or cloud infrastructure were made in this cycle.
