@@ -230,18 +230,21 @@ def run_benchmark(
     run_id = result.get("run_id")
     if not isinstance(run_id, str) or not 1 <= len(run_id) <= 64:
         raise ValueError("Invalid run ID")
-    evidence = []
-    # Three bounded retries for DynamoDB GSI eventual consistency.
+    # A partially propagated trace must not pass simply because *some* events
+    # exist. Retry boundedly until all signed A2A/gateway receipts reconcile.
+    # A final missing or contradictory proof still fails closed.
     for attempt in range(3):
         response = sender("/v1/operator/audit/trace/" + run_id, operator_token)
         evidence = _read_trace(response)
-        if evidence:
-            break
-        if attempt < 2:
+        try:
+            report = analyze_hosted_result(result, evidence, expected_rounds=rounds)
+            report["client_elapsed_seconds"] = round(clock() - start, 3)
+            return report
+        except ValueError:
+            if attempt == 2:
+                raise
             pause(0.4 * (attempt + 1))
-    report = analyze_hosted_result(result, evidence, expected_rounds=rounds)
-    report["client_elapsed_seconds"] = round(clock() - start, 3)
-    return report
+    raise ValueError("Hosted benchmark could not reconcile complete audit evidence")
 
 
 def _read_trace(response: Response) -> list:
