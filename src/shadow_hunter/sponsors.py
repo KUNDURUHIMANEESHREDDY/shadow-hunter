@@ -196,7 +196,7 @@ def sponsor_status() -> dict[str, dict[str, bool | str]]:
     ))
     return {
         "lyzr": {"configured": bool(lyzr), "mode": "advisory_only"},
-        "band": {"configured": bool(band), "mode": "operator_audit_summary_only"},
+        "band": {"configured": bool(band), "publication_ready": bool(band and os.environ.get("SHADOW_HUNTER_BAND_MENTION_AGENT_ID", "").strip()), "mode": "operator_audit_summary_only"},
         "finch": {"configured": False, "mode": "skill_package_prepared_not_published"},
         "adal": {"configured": False, "mode": "demo_script_prepared_no_api"},
     }

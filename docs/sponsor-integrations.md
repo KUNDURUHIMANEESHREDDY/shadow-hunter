@@ -37,8 +37,10 @@ response as untrusted text. No Lyzr SDK/tool is given an authorization path.
 ### BAND: reviewed cross-agent communication
 
 Set `SHADOW_HUNTER_BAND_API_KEY` and `SHADOW_HUNTER_BAND_CHAT_ID`.
-Optionally set `SHADOW_HUNTER_BAND_MENTION_AGENT_ID` to mention an
-authorized collaborating peer. BAND's documented Agent REST API is used for
+For outbound publication you **must** also set
+`SHADOW_HUNTER_BAND_MENTION_AGENT_ID` to an authorized collaborating
+peer; BAND text messages require a participant mention. The standalone
+inbound polling worker needs only the BAND API key and room ID. BAND's documented Agent REST API is used for
 `POST /api/v1/agent/chats/{chat_id}/messages` with `X-API-Key`.
 
 An authenticated operator calls
