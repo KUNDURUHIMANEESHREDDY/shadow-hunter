@@ -274,4 +274,4 @@ Shadow Hunter includes operator-authenticated **Lyzr advisory inference**,
 audit skill package**, and an **AdaL demo-production brief**. They do not
 grant external agents tool execution authority. Provider connectivity,
 Finch publication and exported video are **not yet live-verified**.
-See [Sponsor setup and verification](docs/sponsor-integrations.md).
+For synthetic BAND-to-Lyzr advisory collaboration, run `python -m shadow_hunter.band_worker --once` after configuring both accounts. See [Sponsor setup and verification](docs/sponsor-integrations.md).

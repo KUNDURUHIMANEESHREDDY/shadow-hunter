@@ -190,3 +190,13 @@ def test_band_publish_uses_persisted_decision_not_user_supplied_verdict(tmp_path
         headers=headers,
         json={"trace_id": "trace-sponsor-1", "decision": "ALLOW"},
     ).status_code == 422
+
+
+def test_band_requires_mentioned_peer_before_outbound_publish(monkeypatch):
+    publisher = BandDecisionPublisher("band-demo-key", "room-123")
+    monkeypatch.setattr(
+        "shadow_hunter.sponsors._post_json",
+        lambda *_: pytest.fail("No network should occur without a peer mention"),
+    )
+    with pytest.raises(SponsorConfigurationError):
+        publisher.publish_decision("DENY", "UNKNOWN_OR_FORBIDDEN_TOOL")

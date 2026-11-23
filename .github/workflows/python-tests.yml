@@ -2,7 +2,7 @@ name: Python tests and sponsor boundary checks
 
 on:
   push:
-    branches: [main, feature/diwali-sponsor-guarded-integrations]
+    branches: [main, 'feature/**', 'feat/**']
   pull_request:
     branches: [main]
 
