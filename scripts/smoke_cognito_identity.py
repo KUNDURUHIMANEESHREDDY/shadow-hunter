@@ -69,7 +69,9 @@ def _stack_outputs(cf: object, stack_name: str) -> dict[str, str]:
 def _inspect_identity(idp: object, outputs: Mapping[str, str], region: str) -> dict:
     pool = idp.describe_user_pool(UserPoolId=outputs["UserPoolId"])["UserPool"]
     _require(pool.get("MfaConfiguration") == "ON", "Mandatory MFA is not enabled")
-    _require("SOFTWARE_TOKEN_MFA" in pool.get("EnabledMfas", []),
+    mfa = idp.get_user_pool_mfa_config(UserPoolId=outputs["UserPoolId"])
+    _require(mfa.get("MfaConfiguration") == "ON", "MFA configuration is not mandatory")
+    _require(mfa.get("SoftwareTokenMfaConfiguration", {}).get("Enabled") is True,
              "TOTP MFA not enabled")
     trigger = pool.get("LambdaConfig", {}).get("PreTokenGenerationConfig", {})
     _require(trigger.get("LambdaVersion") == "V3_0", "Pre-token trigger is not V3_0")
