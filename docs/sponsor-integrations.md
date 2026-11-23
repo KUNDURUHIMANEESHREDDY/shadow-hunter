@@ -51,7 +51,7 @@ can submit an arbitrary decision, message, customer ID or refund amount.
 Publication is separately audited; successful HTTP delivery only means BAND
 accepted the message, not that a peer acted on it. A **bounded inbound demonstration worker** is also available via:
 `python -m shadow_hunter.band_worker --once` or explicitly
-`python -m shadow_hunter.band_worker --forever` for fixed-room polling.
+`python -m shadow_hunter.band_worker --forever` for fixed-room polling. Even in\n`--forever` mode, the worker defaults to **20 processed messages or 600\nseconds maximum**, whichever comes first; both limits have bounded CLI\noverrides. One process per room/identity; no auto-launch on the API server.
 It uses Band's documented `GET messages/next`, claim, reply (with sender
 mention), processed and failed APIs. Start it as a separate process with
 both BAND and Lyzr configurations present. To request Lyzr analysis, a
