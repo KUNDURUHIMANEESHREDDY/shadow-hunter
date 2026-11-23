@@ -33,7 +33,7 @@ def apps():
 def test_cognito_preflight_allows_hardened_stage():
     result = check_cognito_config(pool(), *apps())
     assert result.blocked == []
-    assert len(result.passed) == 9
+    assert len(result.passed) == 10
 
 
 def test_cognito_preflight_rejects_unsafe_identity():
