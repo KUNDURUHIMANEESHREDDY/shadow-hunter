@@ -110,8 +110,9 @@ def local_server(tmp_path):
             if process.poll() is not None:
                 raise RuntimeError("Isolated Shadow Hunter HTTP server exited early")
             yield base_url
-        except Exception as exc:
-            # Log only local app initialization errors; never JWTs or user data.
+        except RuntimeError as exc:
+            # Preserve test assertion failures instead of mistaking them for
+            # startup errors; only startup RuntimeErrors include server logs.
             tail = log_path.read_text(encoding="utf-8", errors="replace")[-2500:]
             raise RuntimeError(f"Browser E2E server startup failed: {tail}") from exc
         finally:
