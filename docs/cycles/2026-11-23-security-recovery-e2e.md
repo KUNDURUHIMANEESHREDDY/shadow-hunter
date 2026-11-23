@@ -41,11 +41,19 @@ dependencies:
     python -m compileall -q src/shadow_hunter tests
     python scripts/validate-repo.py
 
-The original locally implemented gate passed 28 focused tests, and its full
-pre-rebase regression suite passed 299 with one skipped. The remote Windows
-computer stopped responding during a later rebase, so those numbers are
-**not a claim that this cloud-authored branch has passed CI**. The matching
-GitHub pull request and its checks are the release evidence for this version.
+## Verified GitHub Actions evidence
+
+Pull request [#12](https://github.com/KUNDURUHIMANEESHREDDY/shadow-hunter/pull/12)
+ran against this implementation and was merged into main
+(squash commit 5aef9e6):
+
+- **Focused security/recovery fault-injection gate:** 26 passed (2.92 s).
+- **Full Python regression:** 320 passed, 1 skipped (9.57 s).
+- **Real Chromium browser E2E job:** passed.
+- **Tracked-repository validation and source/test compilation:** passed.
+
+These are CI results for synthetic local scenarios, not evidence of live
+Cognito OBO/AgentCore authenticated staging execution.
 
 ## Recovery and release boundaries
 
