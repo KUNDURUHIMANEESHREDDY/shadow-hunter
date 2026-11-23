@@ -183,7 +183,11 @@ def main(argv: list[str] | None = None) -> int:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--once", action="store_true", help="Process at most one message (default)")
     mode.add_argument("--forever", action="store_true", help="Poll the configured room until interrupted")
+    parser.add_argument("--max-messages", type=int, default=20, help="Hard cap on advisory messages per process (1-100)")
+    parser.add_argument("--max-seconds", type=int, default=600, help="Hard cap on polling runtime (1-3600s)")
     args = parser.parse_args(argv)
+    if not 1 <= args.max_messages <= 100 or not 1 <= args.max_seconds <= 3600:
+        parser.error("Runtime limits are out of range")
     try:
         worker = BandLyzrAdvisoryWorker(
             BandRoomTransport.from_environment(),
@@ -193,13 +197,18 @@ def main(argv: list[str] | None = None) -> int:
         print("BAND/Lyzr collaboration not configured", file=sys.stderr)
         return 2
     try:
-        while True:
+        started = time.monotonic()
+        handled = 0
+        while time.monotonic() - started < args.max_seconds:
             result = worker.process_once()
             print(f"BAND worker status: {result}", flush=True)
-            if not args.forever:
+            if result == "processed":
+                handled += 1
+            if not args.forever or handled >= args.max_messages:
                 return 0
             if result != "processed":
                 time.sleep(2.0)
+        return 0
     except KeyboardInterrupt:
         return 0
     except SponsorProviderError:
