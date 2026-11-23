@@ -28,6 +28,10 @@ jobs:
           cfn-lint infra/budgets/staging-budget.yaml
       - name: Compile source and tests
         run: python -m compileall -q src/shadow_hunter tests
+      - name: Keyless AWS and Cognito authentication contract gate
+        env:
+          AWS_EC2_METADATA_DISABLED: "true"
+        run: python -m pytest -q tests/test_keyless_auth.py
       - name: Security and recovery fault-injection gate
         env:
           AWS_EC2_METADATA_DISABLED: "true"

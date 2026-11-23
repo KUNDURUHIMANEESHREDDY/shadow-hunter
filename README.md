@@ -258,6 +258,25 @@ LICENSE                        Project license
 THIRD_PARTY_NOTICES.md         Skill and dependency attribution
 ```
 
+## Keyless AWS + Cognito sign-in
+
+For local AWS administration, use `python scripts/connect_aws.py` to sign in
+through the native AWS CLI browser flow rather than configuring long-lived
+IAM access keys. `python scripts/connect_aws.py --check --verify-staging`
+checks the current temporary AWS session and staging identity **read only**.
+AWS-hosted services continue to use execution IAM roles.
+
+Customer sign-in is available at `/customer` using a public Cognito
+authorization-code + PKCE app client, scoped OAuth tokens, and a trusted
+backend session check. The operator console already supports Cognito PKCE at
+`/operator`. No browser M2M secrets or manually entered AWS access keys are
+required. Before real staging login, update the customer app client's exact
+HTTPS callback/logout URL to the deployed `/customer` route; the staging
+client still points to an older localhost callback. This implementation
+does not claim live two-tenant OAuth/OBO sign-off or a deployed AgentCore Harness.
+
+See [keyless authentication setup and test gates](docs/keyless-auth.md).
+
 ## Local development
 
 Python 3.11+ is required. Install the API and optional AWS SDK with `python -m pip install -e ".[server,aws,dev]"`, then start the local API with `shadow-hunter-api`. The API listens on `127.0.0.1:8000` by default and serves the operator console at `/operator`.
