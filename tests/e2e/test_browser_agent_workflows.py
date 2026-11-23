@@ -258,3 +258,25 @@ def test_browser_evaluation_marks_only_valid_gateway_evidence_receipts(page, loc
     expect(table.locator("tr").nth(1)).to_contain_text("Not independently verified")
     assert table.locator("svg").count() == 0
     assert page.evaluate("() => !!window.__unsafe") is False
+
+def test_browser_runs_real_local_red_blue_lab_without_hosted_models(page, local_server):
+    """Chromium invokes actual FastAPI, signed A2A and SQLite policy receipts."""
+    connect(page, local_server)
+    page.locator("#run-synthetic-evaluation").click()
+    expect(page.locator("#agent-eval-mode")).to_contain_text(
+        "Local synthetic simulation", timeout=30000
+    )
+    expect(page.locator("#agent-eval-results tr")).to_have_count(8)
+    expect(page.locator("#agent-eval-results")).to_contain_text("Verified audit")
+    latest = page.request.get(
+        local_server + "/v1/operator/agent-evaluations/latest",
+        headers={"Authorization": f"Bearer {OPERATOR_TOKEN}"},
+    )
+    assert latest.status == 200
+    details = latest.json()["run"]["details"]
+    assert details["hosted_model_used"] is False
+    assert details["runtime"] == "deterministic_local_synthetic"
+    assert details["refunds_executed"] == 0
+    page.get_by_role("button", name="Disconnect").click()
+    expect(page.locator("#agent-eval-mode")).to_have_text("Sign in to view evaluations.")
+    expect(page.locator("#agent-eval-results")).to_contain_text("Sign in to load evaluations.")

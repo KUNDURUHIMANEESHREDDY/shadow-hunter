@@ -370,3 +370,36 @@ a still-incomplete trace up to three bounded times. It does not accept any
 partial result or relax verification when a retry expires. This is a
 **local-to-staging gateway audit consistency gate**, not a claim of an
 externally independent or immutable audit store.
+
+## Keyless local Red/Blue evaluation lab (23 November 2026)
+
+Operators can now use **Run 8-round local simulation** in `/operator`, or
+invoke `POST /v1/operator/agent-evaluations/synthetic` with an authenticated
+operator bearer token and optional `{"rounds": 1..8}`. This endpoint needs
+no NVIDIA, AWS, or other hosted model credentials. It uses a temporary
+SQLite database with fictional orders, ephemeral per-agent HMAC signing keys,
+deterministic strategies, and the real ToolGateway policy engine.
+
+Every round must pass independent persisted A2A and policy-audit reconciliation
+before the endpoint records a result. Only bounded, redacted result fields and
+semantic SHA-256 receipts are saved in the operator audit database. The final
+`AGENT_EVALUATION_RUN` marker is persisted **after** all per-round results, so
+an interrupted run is not displayed as completed. The evaluation never reads
+orders from the configured application store or executes refunds.
+
+**Controls:** operator authentication, integer-only rounds (1–8), a separate
+local-simulation operator budget of five runs/day and ten seconds between
+attempts, plus `SHADOW_HUNTER_SYNTHETIC_EVAL_ENABLED=false` to disable this
+feature. The existing hosted-model evaluation budget and kill switch remain
+independent. The dashboard labels deterministic local results distinctly
+from hosted inference. For reproducible command-line evidence, run:
+
+```sh
+python scripts/run_red_blue_synthetic.py --rounds 8 --output artifacts/local-evaluation.json
+```
+
+The source for the CLI and operator endpoint is the same packaged evaluator:
+`shadow_hunter.synthetic_eval.evaluate`. This tests synthetic signed A2A,
+policy enforcement, and audit consistency, **not** real remote agents, Cognito
+delegation, AWS policy Gateway, cloud LLM reasoning, or immutable-log integrity.
+A passing local simulation is not a production release gate.

@@ -137,10 +137,14 @@
   <section class="panel" id="agent-evaluation">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap">
       <div>
-        <h2>Red/Blue hosted NVIDIA NIM evaluation</h2>
-        <p>Red: Nemotron 3.5 Lightning 30B A3B · Blue: Nemotron 3.5 Bolt E4B. Server NIM and HMAC credentials required. Synthetic data only; deterministic policy remains authoritative.</p>
+        <h2>Red/Blue evaluation lab</h2>
+        <p>Local: deterministic signed Red/Blue scenarios, policy enforcement and verified audit receipts. No API key or cloud model calls. Hosted: NVIDIA NIM models require separate server credentials and authorization.</p>
+        <p id="agent-eval-mode" class="muted" aria-live="polite">No evaluation completed yet.</p>
       </div>
-      <button id="run-agent-evaluation">Run 3-round NIM evaluation</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="secondary" id="run-synthetic-evaluation">Run 8-round local simulation</button>
+        <button id="run-agent-evaluation">Run 3-round NIM evaluation</button>
+      </div>
     </div>
     <div class="grid" id="agent-eval-metrics" style="margin-top:16px;margin-bottom:8px">
       <div class="metric"><span>Attack attempts</span><strong>—</strong></div>
@@ -207,6 +211,7 @@
     $("approvals").innerHTML = '<tr><td colspan="6" class="muted">Sign in to load approvals.</td></tr>';
     $("audit").innerHTML = '<tr><td colspan="6" class="muted">Sign in to load audit events.</td></tr>';
     $("agent-eval-results").innerHTML = '<tr><td colspan="10" class="muted">Sign in to load evaluations.</td></tr>';
+    $("agent-eval-mode").textContent = "Sign in to view evaluations.";
     $("trace-panel").hidden = true;
     $("trace-id").textContent = "";
     $("trace-events").replaceChildren();
@@ -328,9 +333,13 @@
     const run = snapshot && snapshot.run;
     if (!run) {
       $("agent-eval-results").innerHTML = '<tr><td colspan="10" class="muted">No evaluation has been run yet.</td></tr>';
+      $("agent-eval-mode").textContent = "No evaluation completed yet.";
       return;
     }
     const details = run.details || {};
+    $("agent-eval-mode").textContent = details.runtime === "deterministic_local_synthetic"
+      ? "Local synthetic simulation · no hosted models or customer orders · " + (details.verified_rounds ?? "—") + " verified rounds"
+      : "Hosted model evaluation · synthetic order sandbox · " + (details.verified_rounds ?? "—") + " verified rounds";
     const values = [
       [details.attack_attempts, "Attack attempts"],
       [percent(details.attack_success_rate), "Attack success rate"],
@@ -577,6 +586,29 @@
       if (generation === loadGeneration) setMessage(error.message, true);
     } finally {
       if (generation === loadGeneration && operatorToken) $("publish-band").disabled = false;
+    }
+  });
+  $("run-synthetic-evaluation").addEventListener("click", async () => {
+    const button = $("run-synthetic-evaluation");
+    if (!operatorToken) { setMessage("Sign in before running the local simulation.", true); return; }
+    const token = operatorToken;
+    const generation = loadGeneration;
+    button.disabled = true;
+    button.textContent = "Checking synthetic policies…";
+    try {
+      const result = await api("/v1/operator/agent-evaluations/synthetic", {
+        method: "POST", body: JSON.stringify({rounds: 8})
+      });
+      if (token !== operatorToken || generation !== loadGeneration) return;
+      await load();
+      if (token !== operatorToken) return;
+      setMessage("Local Red/Blue simulation completed: " +
+        result.verified_rounds + " independently verified rounds. No model API or real customer data used.");
+    } catch (error) {
+      if (token === operatorToken) setMessage(error.message, true);
+    } finally {
+      button.disabled = false;
+      button.textContent = "Run 8-round local simulation";
     }
   });
   $("run-agent-evaluation").addEventListener("click", async () => {

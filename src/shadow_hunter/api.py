@@ -41,6 +41,7 @@ from .nim import (
 from .policy import PolicyConfig, PolicyEngine, Principal
 from .settings import IntegrationSecretStore, IntegrationSettingsError
 from .store import SQLiteStore, StoreError
+from .synthetic_eval import evaluate as evaluate_synthetic
 from .sponsors import (
     BandDecisionPublisher, LyzrAdvisor,
     SponsorConfigurationError, SponsorProviderError, sponsor_status,
@@ -656,6 +657,100 @@ def create_app(
             refund_eligible=True,
         )
         return {"status": "seeded", "order_id": "order-demo-001"}
+
+    @app.post("/v1/operator/agent-evaluations/synthetic")
+    def run_synthetic_agent_evaluation(
+        body: dict[str, Any] = Body(default={}),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        """Run signed Red/Blue checks in an isolated synthetic SQLite sandbox.
+
+        Only redacted results cross into the main operator audit store.
+        The hosted provider client, live customer data and payment paths are
+        never used by this endpoint.
+        """
+        operator_id = operator(authorization)
+        if set(body) - {"rounds"}:
+            raise HTTPException(status_code=422, detail="Only rounds is accepted")
+        rounds = body.get("rounds", 8)
+        if type(rounds) is not int or not 1 <= rounds <= 8:
+            raise HTTPException(status_code=422, detail="rounds must be an integer between 1 and 8")
+        if os.environ.get("SHADOW_HUNTER_SYNTHETIC_EVAL_ENABLED", "true").lower() not in {
+            "true", "1", "yes", "on"
+        }:
+            raise HTTPException(status_code=503, detail="Local synthetic evaluations are disabled")
+        try:
+            # Independent quota from hosted evaluations; each request is
+            # bounded even when no hosted model credentials exist.
+            store.reserve_agent_evaluation(
+                "synthetic-evaluation:" + operator_id,
+                daily_limit=5,
+                cooldown_seconds=10,
+            )
+        except (StoreError, ValueError):
+            raise HTTPException(status_code=429, detail="Synthetic evaluation cooldown or daily limit exceeded") from None
+
+        try:
+            report = evaluate_synthetic(rounds=rounds)
+            if (
+                report.get("hosted_model_used") is not False
+                or report.get("refunds_executed") != 0
+                or len(report.get("results", [])) != rounds
+            ):
+                raise ValueError("Synthetic evaluator violated isolation invariants")
+        except (ValueError, RuntimeError, StoreError):
+            raise HTTPException(status_code=503, detail="Synthetic evaluation evidence could not be verified") from None
+
+        run_id = str(uuid4())
+        results = []
+        for row in report["results"]:
+            result = {
+                **row,
+                "decision": row["actual_decision"],
+                "defense_model": "deterministic_rules",
+                "strategy_summary": "Fixed synthetic policy scenario",
+                "analysis_summary": "Independently reconciled signed A2A and policy audit events",
+                "attack_prevented": row["is_attack"] and row["passed"],
+                "attack_success": row["is_attack"] and row["actual_decision"] == "ALLOW",
+                "evidence_verified": True,
+            }
+            results.append(result)
+            store.append_audit(
+                event_type="AGENT_EVALUATION_RESULT",
+                trace_id=run_id,
+                request_id=run_id + "-" + str(row["round"]),
+                decision=result["decision"],
+                reason_code=row["reason_code"],
+                actor_id="blue-agent",
+                tenant_id="evaluation-sandbox",
+                resource_id=row["scenario_id"],
+                details=result,
+            )
+
+        # Commit the summary last: the "latest" view never selects a partially
+        # written evaluation if an individual result could not be persisted.
+        summary = {
+            **report["metrics"],
+            "runtime": "deterministic_local_synthetic",
+            "hosted_model_used": False,
+            "provider": "none",
+            "run_id": run_id,
+            "rounds_requested": rounds,
+            "verified_rounds": len(results),
+            "evidence_verification": report["verification_method"],
+            "evidence_chain_sha256": report["evidence_chain_sha256"],
+            "catalogue_sha256": report["catalogue_sha256"],
+            "refunds_executed": 0,
+        }
+        store.append_audit(
+            event_type="AGENT_EVALUATION_RUN",
+            trace_id=run_id,
+            request_id=run_id,
+            actor_id=operator_id,
+            tenant_id="evaluation-sandbox",
+            details=summary,
+        )
+        return {**summary, "results": results}
 
     @app.post("/v1/operator/agent-evaluations/run")
     def run_agent_evaluation(
