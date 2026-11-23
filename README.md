@@ -111,6 +111,7 @@ These are system requirements, not claims that the current repository already sa
 
 - **Local isolated security matrix:** 14 new tests passed across SQLite, Moto DynamoDB/S3, HTTP authentication boundaries, tenant/customer ownership and archive tamper/orphan/duplicate scenarios.
 - **Full regression:** 201 Python tests passed on an isolated worktree at security branch commit `45124a0`; repository validator, compileall and git diff checks passed.
+- **Static/dependency checks:** Bandit medium/high scan exit 0; pip-audit on `src/requirements.txt` returned no known vulnerabilities (exit 0).
 - **Live staging unauthenticated checks:** `GET /prod/health` returned 200 with anti-framing/nosniff headers; operator audit/approvals and customer agent tool/chat endpoints returned 401 without bearer tokens.
 - **Not finished:** AWS CLI session expired before full staging audit key/byte verification. No real two-tenant Cognito/OBO tokens, authenticated staging cross-tenant matrix or independent penetration test evidence is available. Production remains **NO-GO**. See [verification report](docs/cycles/2026-11-23-security-validation.md).
 
