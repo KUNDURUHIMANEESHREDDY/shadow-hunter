@@ -270,6 +270,8 @@ class ToolGateway:
             reason_code=reason_code,
             actor_id=principal.subject_id,
             tenant_id=principal.tenant_id,
+            policy_id=self.policy.config.policy_id,
+            policy_version=self.policy.config.version,
             details={
                 "tool_name": str(tool_name)[:100],
                 "agent_id": str(agent_id)[:100],
