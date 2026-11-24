@@ -98,3 +98,75 @@ def test_independent_batch_dispatch(context):
     assert all(r["status"]=="completed" for r in results)
     assert len({r["trace_id"] for r in results})==3
     assert queue.list(b)[0]["state"]=="queued"
+
+
+def test_utility_registry_without_business_gateway(context):
+    store,a,b,gateway=context
+    queue=DurableScheduler(store)
+    queue.enqueue(a,"numeric_summary","1,2.5,-1")
+    result=queue.dispatch_next(a,None)
+    assert result["status"]=="completed" and result["result"]["sum"]=="2.5"
+    with pytest.raises(ValueError):
+        queue.enqueue(a,"numeric_summary","1,invalid")
+    with pytest.raises(ValueError):
+        queue.enqueue(a,"model_readiness","http://example.com")
+
+
+def test_scheduled_jobs_wait_and_revalidate(context,monkeypatch):
+    from shadow_hunter.auth import TokenAuthenticator
+    from shadow_hunter import scheduler as module
+    store,a,b,gateway=context
+    queue=DurableScheduler(store)
+    now=100000
+    monkeypatch.setattr(module.time,"time",lambda:now)
+    first=queue.enqueue(a,"order_summary","owned",delay_seconds=60)
+    second=queue.enqueue(b,"order_summary","owned",delay_seconds=60)
+    auth=TokenAuthenticator(customer_tokens={"a":{"subject_id":"a","tenant_id":"t","customer_id":"c"}},operator_tokens={})
+    assert queue.claim_next(a) is None
+    assert queue.dispatch_due(gateway,auth.resolve_scheduled_owner)==[]
+    now+=60
+    results=queue.dispatch_due(gateway,auth.resolve_scheduled_owner)
+    assert len(results)==1 and results[0]["status"]=="completed"
+    assert queue.list(a)[0]["state"]=="completed"
+    assert queue.list(b)[0]["state"]=="denied"
+    assert queue.dispatch_due(gateway,auth.resolve_scheduled_owner)==[]
+
+
+def test_scheduled_expiry_cancel_and_restart(context,monkeypatch):
+    from shadow_hunter import scheduler as module
+    store,a,b,gateway=context
+    now=100000
+    monkeypatch.setattr(module.time,"time",lambda:now)
+    queue=DurableScheduler(store)
+    job=queue.enqueue(a,"numeric_summary","1,2",delay_seconds=20)
+    other=queue.enqueue(a,"numeric_summary","1,2",delay_seconds=20)
+    assert queue.cancel(a,other)
+    queue=DurableScheduler(SQLiteStore(store.database_path))
+    now+=321
+    assert queue.dispatch_due(gateway,lambda owner:a)==[]
+    assert {r["job_id"]:r["state"] for r in queue.list(a)}=={job:"interrupted",other:"cancelled"}
+
+
+def test_unattended_worker_lifespan(context,monkeypatch):
+    import time
+    from fastapi.testclient import TestClient
+    from shadow_hunter.auth import TokenAuthenticator
+    from shadow_hunter.api import create_app
+    store,a,b,gateway=context
+    monkeypatch.setenv("SHADOW_HUNTER_AUTH_MODE","local")
+    monkeypatch.setenv("SHADOW_HUNTER_LOCAL_READONLY_ENABLED","true")
+    monkeypatch.setenv("SHADOW_HUNTER_AUTO_JOBS_ENABLED","true")
+    monkeypatch.delenv("AWS_LAMBDA_FUNCTION_NAME",raising=False)
+    auth=TokenAuthenticator(customer_tokens={"a":{"subject_id":"a","tenant_id":"t","customer_id":"c"}},operator_tokens={})
+    path="/v1/agent/local-jobs"; headers={"Authorization":"Bearer a"}
+    with TestClient(create_app(store=store,authenticator=auth)) as client:
+        response=client.post(path,headers=headers,json={"capability":"numeric_summary","order_id":"1,2,3","delay_seconds":0})
+        assert response.status_code==200
+        for _ in range(30):
+            rows=client.get(path,headers=headers).json()["jobs"]
+            if rows and rows[0]["state"]=="completed": break
+            time.sleep(.1)
+        assert rows[0]["state"]=="completed"
+        assert client.post(path,headers=headers,json={"capability":"numeric_summary","order_id":"1,2","delay_seconds":3601}).status_code==422
+        monkeypatch.setenv("SHADOW_HUNTER_AUTO_JOBS_ENABLED","false")
+        assert client.post(path,headers=headers,json={"capability":"numeric_summary","order_id":"1,2","delay_seconds":0}).status_code==422

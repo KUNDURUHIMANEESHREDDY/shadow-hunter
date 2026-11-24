@@ -48,6 +48,14 @@ class TokenAuthenticator:
     def authenticate_customer(self, token: str | None) -> Principal | None:
         return _principal_from_claims(self._lookup(self.customer_tokens, token))
 
+    def resolve_scheduled_owner(self, owner: tuple[str, str, str]) -> Principal | None:
+        """Resolve an existing local identity, without retaining a bearer token."""
+        for claims in self.customer_tokens.values():
+            principal = _principal_from_claims(claims)
+            if principal and (principal.subject_id,principal.tenant_id,principal.customer_id)==owner:
+                return principal
+        return None
+
     def authenticate_gateway_tool(self, token: str | None) -> Principal | None:
         # Local direct-tool exercises use the configured customer identity.
         # Cognito mode requires a distinct OBO JWT profile instead.

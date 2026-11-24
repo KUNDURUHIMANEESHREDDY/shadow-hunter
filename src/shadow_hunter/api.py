@@ -27,7 +27,7 @@ from .agents import (
     RedBlueSimulation,
 )
 from .approvals import ApprovalService
-from .auth import build_authenticator_from_environment
+from .auth import TokenAuthenticator, build_authenticator_from_environment
 from .gateway import GatewayError, ToolGateway, public_tool_result
 from .evidence import verify_round_evidence
 from .mcp_server import build_mcp_runtime
@@ -95,10 +95,42 @@ def create_app(
         except AgentCoreNotConfigured:
             harness_client = None
 
+    def auto_jobs_enabled():
+        return (
+            isinstance(store, SQLiteStore)
+            and isinstance(authenticator, TokenAuthenticator)
+            and os.environ.get("SHADOW_HUNTER_LOCAL_READONLY_ENABLED", "").lower()=="true"
+            and os.environ.get("SHADOW_HUNTER_AUTH_MODE", "local").lower()=="local"
+            and os.environ.get("SHADOW_HUNTER_AUTO_JOBS_ENABLED", "true").lower()=="true"
+            and not os.environ.get("AWS_LAMBDA_FUNCTION_NAME")
+        )
+
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        import asyncio
+        import logging
+        stop=asyncio.Event()
+        async def worker():
+            from .scheduler import DurableScheduler
+            while not stop.is_set():
+                if auto_jobs_enabled():
+                    try:
+                        await asyncio.to_thread(lambda: DurableScheduler(store).dispatch_due(
+                            gateway,authenticator.resolve_scheduled_owner))
+                    except Exception:
+                        logging.getLogger(__name__).warning("Local job dispatch failed")
+                try:
+                    await asyncio.wait_for(stop.wait(),timeout=1)
+                except TimeoutError:
+                    pass
         async with mcp_server.session_manager.run():
-            yield
+            task=asyncio.create_task(worker()) if auto_jobs_enabled() else None
+            try:
+                yield
+            finally:
+                stop.set()
+                if task is not None:
+                    await task
 
     app = FastAPI(
         title="Shadow Hunter",
@@ -493,17 +525,22 @@ def create_app(
     def list_local_jobs(authorization: str | None = Header(default=None)):
         principal, scheduler = local_scheduler(authorization)
         from .scheduler import CAPABILITIES
-        return {"capabilities": list(CAPABILITIES), "jobs": scheduler.list(principal)}
+        return {"capabilities": list(CAPABILITIES), "jobs": scheduler.list(principal),
+                "automatic_enabled": auto_jobs_enabled()}
 
     @app.post("/v1/agent/local-jobs")
     def enqueue_local_job(body: dict[str, Any] = Body(...),
                           authorization: str | None = Header(default=None)):
         principal, scheduler = local_scheduler(authorization)
         from .scheduler import QueueBusy
-        if set(body) != {"capability", "order_id"}:
+        if not {"capability","order_id"} <= set(body) or set(body)-{"capability","order_id","delay_seconds"}:
             raise HTTPException(status_code=422,detail="Invalid job")
         try:
-            return {"job_id": scheduler.enqueue(principal,body["capability"],body["order_id"]),
+            delay=body.get("delay_seconds")
+            if "delay_seconds" in body and (delay is None or not auto_jobs_enabled()):
+                raise ValueError("Automatic scheduling unavailable")
+            return {"job_id": scheduler.enqueue(principal,body["capability"],body["order_id"],
+                                                delay_seconds=delay),
                     "status":"queued"}
         except ValueError:
             raise HTTPException(status_code=422,detail="Invalid job") from None

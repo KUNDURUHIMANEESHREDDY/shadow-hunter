@@ -217,3 +217,23 @@ def test_durable_queue_browser(page, local_runtime_enabled, local_server):
     page.locator("#disconnect").click()
     expect(page.locator("#jobs-list tr")).to_have_count(0)
     expect(page.locator("#jobs-result")).to_be_empty()
+
+
+def test_automatic_utility_job_browser(page,local_runtime_enabled,local_server):
+    from playwright.sync_api import expect
+    page.goto(local_server+"/local-workspace")
+    page.locator("#token").fill(CUSTOMER_TOKEN)
+    page.locator("#connect").click()
+    expect(page.locator("#status")).to_have_text("Connected to local account.")
+    page.locator("#job-capability").select_option("numeric_summary")
+    page.locator("#numeric-input").fill("1,2,3")
+    page.locator("#job-delay").select_option("0")
+    page.locator("#job-add").click()
+    expect(page.locator("#jobs-list tr")).to_have_count(1)
+    for _ in range(10):
+        page.locator("#jobs-refresh").click()
+        page.wait_for_timeout(300)
+        if "completed" in page.locator("#jobs-list").inner_text(): break
+    expect(page.locator("#jobs-list")).to_contain_text("completed")
+    page.locator("#disconnect").click()
+    expect(page.locator("#numeric-input")).to_have_value("")
