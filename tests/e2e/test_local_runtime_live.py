@@ -296,3 +296,16 @@ def test_workflow_recovery_report_browser(page,local_runtime_enabled,local_serve
     assert result["recovery"]["retries"]==0
     assert all(value==1 for value in result["recovery"]["attempts"].values())
     assert result["recovery"]["revisions"][-1]["remaining"]=={}
+
+
+def test_mcp_discovery_disabled_browser(page,local_runtime_enabled,local_server):
+    from playwright.sync_api import expect
+    page.goto(local_server+"/local-workspace")
+    page.locator("#token").fill(CUSTOMER_TOKEN)
+    page.locator("#connect").click()
+    expect(page.locator("#status")).to_have_text("Connected to local account.")
+    page.locator("#mcp-discover").click()
+    expect(page.locator("#mcp-discovery-status")).to_have_text("MCP companion: disabled")
+    page.locator("#disconnect").click()
+    expect(page.locator("#mcp-discovery-status")).to_be_empty()
+    expect(page.locator("#mcp-discover")).to_be_disabled()

@@ -51,6 +51,12 @@ CAPABILITY_CATALOG=MappingProxyType({item.name:item for item in (
     Capability("public_repo_metadata","Public repository metadata","external",None,"repository",
                "Read metadata for an explicitly approved public GitHub repository.",
                (r"\b(?:metadata|stars|forks|default branch|repository info|repository details|star count)\b",),True),
+    Capability("mcp_public_package","MCP Python package metadata","mcp",None,"package",
+               "Read the published version of an approved Python package via local MCP.",
+               (r"\b(?:pypi|python package|package)\b",r"\b(?:version|metadata|release)\b"),True),
+    Capability("mcp_repo_metadata","MCP public repository metadata","mcp",None,"repository",
+               "Read approved GitHub metadata via the local MCP companion.",
+               (r"\bmcp\b",r"\b(?:metadata|stars|forks|default branch|repository info|repository details|star count)\b"),True),
 )})
 CAPABILITIES=MappingProxyType({key:item.intent for key,item in CAPABILITY_CATALOG.items()})
 
@@ -58,12 +64,14 @@ CAPABILITIES=MappingProxyType({key:item.intent for key,item in CAPABILITY_CATALO
 def enabled_names() -> frozenset[str]:
     """An unset configuration enables built-ins; malformed values fail closed."""
     raw=os.environ.get("SHADOW_HUNTER_ENABLED_CAPABILITIES")
+    from .mcp_client import companion_enabled, CONTRACTS
+    available=frozenset(CAPABILITY_CATALOG) if companion_enabled() else frozenset(CAPABILITY_CATALOG)-CONTRACTS.keys()
     if raw is None:
-        return frozenset(CAPABILITY_CATALOG)
+        return available
     names=frozenset(part.strip() for part in raw.split(",") if part.strip())
     if not names.issubset(CAPABILITY_CATALOG):
         return frozenset()
-    return names
+    return names & available
 
 
 def discover_capabilities():

@@ -234,6 +234,9 @@ def numeric_values(value: str):
 
 
 def run_utility(capability: str, resource: str):
+    from .mcp_client import CONTRACTS, invoke
+    if capability in CONTRACTS:
+        return invoke(capability,resource)
     if capability=="numeric_summary":
         values=numeric_values(resource)
         return {"status":"completed","count":len(values),"sum":str(sum(values)),
@@ -258,6 +261,9 @@ def validate_resource(capability,resource):
     require_enabled(capability)
     if not isinstance(capability,str) or capability not in CAPABILITIES or not isinstance(resource,str) or not resource.strip() or resource.strip()!=resource or len(resource)>128:
         raise ValueError("Invalid capability input")
+    from .mcp_client import CONTRACTS, validate_input
+    if capability in CONTRACTS:
+        validate_input(capability,resource)
     if capability=="model_readiness" and resource!="local":
         raise ValueError("Invalid fixed resource")
     if capability=="numeric_summary":

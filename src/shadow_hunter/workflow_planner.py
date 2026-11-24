@@ -69,10 +69,15 @@ def candidate_phases(objective,order_id=""):
                     add("numeric_summary",",".join(p.strip() for p in match.group().split(",")))
             if "model_readiness" in matched:
                 add("model_readiness","local")
-            if "public_repo_metadata" in matched:
+            if "mcp_public_package" in matched:
+                from .mcp_client import PACKAGES
+                for package in sorted(PACKAGES):
+                    if re.search(r"(?<![\w/.-])"+re.escape(package)+r"(?![\w/.-])",clause,re.I):
+                        add("mcp_public_package",package)
+            if "public_repo_metadata" in matched or "mcp_repo_metadata" in matched:
                 for repo in sorted(PUBLIC_REPOSITORIES):
                     if re.search(r"(?<![\w/.-])"+re.escape(repo)+r"(?![\w/.-])",clause,re.I):
-                        add("public_repo_metadata",repo)
+                        add("mcp_repo_metadata" if "mcp_repo_metadata" in matched else "public_repo_metadata",repo)
             if candidates:
                 # Never silently approve ambiguous mixed input with unrecognized requests.
                 if len(candidates)!=1 or re.search(r"\b(?:also|or|but|except|instead|not|without|if)\b",clause,re.I):

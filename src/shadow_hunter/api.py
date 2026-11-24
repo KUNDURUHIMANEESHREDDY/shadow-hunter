@@ -548,6 +548,18 @@ def create_app(
         except QueueBusy:
             raise HTTPException(status_code=429,detail="Job queue busy") from None
 
+    @app.get("/v1/agent/local-mcp-tools")
+    def list_local_mcp_tools(authorization: str | None = Header(default=None)):
+        gateway_tool_principal(authorization)
+        require_local_runtime()
+        from .mcp_client import companion_enabled, discover
+        if not companion_enabled():
+            return {"status":"disabled","capabilities":[]}
+        try:
+            return {"status":"ready","capabilities":discover()}
+        except RuntimeError:
+            return {"status":"unavailable","capabilities":[]}
+
     @app.get("/v1/agent/local-capabilities")
     def list_local_capabilities(authorization: str | None = Header(default=None)):
         gateway_tool_principal(authorization)
