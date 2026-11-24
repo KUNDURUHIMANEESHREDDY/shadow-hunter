@@ -264,6 +264,9 @@ def tracked_readonly_task(gateway: ToolGateway, principal: Principal, *,
                 new_trace = event["trace_id"]
                 gateway.store.begin_local_task(principal, new_trace)
                 trace = new_trace
+            if event["type"] == "progress" and event.get("stage") == "recovery":
+                # History counts the active attempt; audit retains all decisions.
+                steps = 0
             if event["type"] == "progress" and event.get("stage") == "tool" and event.get("status") == "verified":
                 steps += 1
             if event["type"] == "result":
