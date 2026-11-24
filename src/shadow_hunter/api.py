@@ -488,6 +488,13 @@ def create_app(
         require_local_runtime()
         return FileResponse(WEB_ROOT / "local-workspace.html", headers={"Cache-Control": "no-store"})
 
+    @app.get("/v1/agent/local-readonly/readiness")
+    def local_model_readiness(authorization: str | None = Header(default=None)):
+        from .local_runtime import model_readiness
+        gateway_tool_principal(authorization)
+        require_local_runtime()
+        return model_readiness()
+
     @app.get("/v1/agent/local-readonly/history")
     def local_task_history(authorization: str | None = Header(default=None)):
         principal = gateway_tool_principal(authorization)
@@ -499,7 +506,7 @@ def create_app(
         body: dict[str, Any] = Body(...),
         authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
-        from .local_runtime import LocalRuntimeError, tracked_readonly_task
+        from .local_runtime import LocalRuntimeError, public_runtime_error, tracked_readonly_task
         principal, prompt, order_id = local_task_inputs(body, authorization)
         try:
             for event in tracked_readonly_task(gateway, principal, prompt=prompt, order_id=order_id):
@@ -508,8 +515,8 @@ def create_app(
             raise LocalRuntimeError("No final result")
         except ValueError as exc:
             raise HTTPException(status_code=422, detail="Invalid local task") from exc
-        except (LocalRuntimeError, GatewayError, StoreError):
-            raise HTTPException(status_code=503, detail="Local task could not complete") from None
+        except (LocalRuntimeError, GatewayError, StoreError) as exc:
+            raise HTTPException(status_code=503, detail=public_runtime_error(exc)) from None
 
     @app.post("/v1/agent/local-readonly/stream")
     def local_readonly_stream(
@@ -517,14 +524,14 @@ def create_app(
         authorization: str | None = Header(default=None),
     ):
         import json
-        from .local_runtime import LocalRuntimeError, tracked_readonly_task
+        from .local_runtime import LocalRuntimeError, public_runtime_error, tracked_readonly_task
         principal, prompt, order_id = local_task_inputs(body, authorization)
         def events():
             try:
                 for event in tracked_readonly_task(gateway, principal, prompt=prompt, order_id=order_id):
                     yield json.dumps(event, ensure_ascii=True) + "\n"
-            except (LocalRuntimeError, GatewayError, StoreError, ValueError):
-                yield json.dumps({"type": "error", "status": "failed", "message": "Task could not be verified"}) + "\n"
+            except (LocalRuntimeError, GatewayError, StoreError, ValueError) as exc:
+                yield json.dumps({"type": "error", "status": "failed", "message": public_runtime_error(exc)}) + "\n"
         return StreamingResponse(events(), media_type="application/x-ndjson",
                                  headers={"X-Accel-Buffering": "no", "Cache-Control": "no-store"})
 

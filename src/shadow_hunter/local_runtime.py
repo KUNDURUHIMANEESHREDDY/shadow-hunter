@@ -22,6 +22,9 @@ PLANS = {
 }
 AGENT_ID = "local-readonly-support"
 PLAN_TIMEOUT = 45.0
+QUEUE_TIMEOUT = 5.0
+# One active planner plus one bounded waiting request; no tool permissions change.
+_ADMISSION = threading.BoundedSemaphore(2)
 _LOCK = threading.Lock()
 
 class LocalRuntimeError(RuntimeError):
@@ -29,6 +32,44 @@ class LocalRuntimeError(RuntimeError):
 
 class InvalidPlan(LocalRuntimeError):
     pass
+
+
+class ModelUnavailable(LocalRuntimeError):
+    pass
+
+
+class PlannerBusy(LocalRuntimeError):
+    pass
+
+
+def public_runtime_error(exc: Exception) -> str:
+    if isinstance(exc, ModelUnavailable):
+        return "Local model unavailable. Check Ollama and the installed Qwen model."
+    if isinstance(exc, PlannerBusy):
+        return "Local planner busy. Try the request again shortly."
+    return "Task could not be verified."
+
+
+def model_readiness() -> dict[str, Any]:
+    """Check only the configured loopback service; never start a process or pull a model."""
+    status = "unavailable"
+    try:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open("http://127.0.0.1:11434/api/tags", timeout=2.0) as response:
+            raw = response.read(262145)
+        if len(raw) > 262144:
+            raise ValueError("Oversized model list")
+        payload = json.loads(raw)
+        models = payload.get("models") if isinstance(payload, dict) else None
+        if not isinstance(models, list):
+            raise ValueError("Invalid model list")
+        status = "ready" if any(isinstance(item, dict) and
+                                (item.get("name") == MODEL or item.get("model") == MODEL)
+                                for item in models) else "model_missing"
+    except (OSError, ValueError, TypeError):
+        pass
+    return {"model": MODEL, "status": status, "ready": status == "ready"}
+
 
 def _proposal_intent(answer: Any) -> str:
     """Translate only validated support capabilities into the legacy intent contract."""
@@ -114,7 +155,7 @@ def _classify(prompt: str, *, review: bool, deadline: float) -> str:
                 raw = response.read(65537)
         except (OSError, urllib.error.URLError) as exc:
             # Do not keep retrying an unavailable model.
-            raise LocalRuntimeError("Local model unavailable") from exc
+            raise ModelUnavailable("Local model unavailable") from exc
         try:
             if len(raw) > 65536:
                 raise ValueError("Oversized response")
@@ -158,9 +199,13 @@ def _explicit_change_request(prompt: str) -> bool:
 def plan_readonly_task(prompt: str) -> str:
     if _explicit_change_request(prompt):
         return "unsupported"
-    if not _LOCK.acquire(blocking=False):
-        raise LocalRuntimeError("Local model busy")
+    if not _ADMISSION.acquire(blocking=False):
+        raise PlannerBusy("Local planning queue full")
+    acquired = False
     try:
+        acquired = _LOCK.acquire(timeout=QUEUE_TIMEOUT)
+        if not acquired:
+            raise PlannerBusy("Local planning queue timeout")
         deadline = time.monotonic() + PLAN_TIMEOUT
         proposal = _classify(prompt, review=False, deadline=deadline)
         review = _classify(prompt, review=True, deadline=deadline)
@@ -171,7 +216,9 @@ def plan_readonly_task(prompt: str) -> str:
             return "clarify"
         return proposal
     finally:
-        _LOCK.release()
+        if acquired:
+            _LOCK.release()
+        _ADMISSION.release()
 
 def support_workflow(intent: str) -> list[dict[str, Any]]:
     """Compile the reviewed intent into a server-owned dependency description.

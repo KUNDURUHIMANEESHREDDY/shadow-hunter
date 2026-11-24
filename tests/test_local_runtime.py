@@ -404,3 +404,74 @@ def test_overlapping_independent_support_reads_preserve_account_isolation(monkey
         audit = [e for e in gateway.store.get_trace_events(result["trace_id"]) if e["event_type"] == "POLICY_DECISION"]
         assert len(audit) == 2
         assert all(e["actor_id"] == principal.subject_id and e["tenant_id"] == principal.tenant_id and e["resource_id"] == order_id for e in audit)
+
+
+@pytest.mark.parametrize("models, status", [
+    ([{"name": rt.MODEL}], "ready"),
+    ([{"model": rt.MODEL}], "ready"),
+    ([{"name": "another-model"}], "model_missing"),
+    ([], "model_missing"),
+    (None, "unavailable"),
+])
+def test_local_model_readiness(monkeypatch, models, status):
+    import json
+    from unittest.mock import MagicMock
+    response = MagicMock()
+    response.__enter__.return_value.read.return_value = json.dumps({"models": models}).encode()
+    opener = Mock()
+    opener.open.return_value = response
+    monkeypatch.setattr(rt.urllib.request, "build_opener", lambda *args: opener)
+    assert rt.model_readiness() == {"model": rt.MODEL, "status": status, "ready": status == "ready"}
+    opener.open.assert_called_once_with("http://127.0.0.1:11434/api/tags", timeout=2.0)
+
+
+def test_readiness_unavailable_is_sanitized(monkeypatch):
+    opener = Mock()
+    opener.open.side_effect = OSError("private internal error")
+    monkeypatch.setattr(rt.urllib.request, "build_opener", lambda *args: opener)
+    assert rt.model_readiness()["status"] == "unavailable"
+    assert "private" not in rt.public_runtime_error(rt.ModelUnavailable("private internal error"))
+    assert rt.public_runtime_error(rt.LocalRuntimeError("private internal error")) == "Task could not be verified."
+
+
+def test_full_planner_admission_does_not_call_model(monkeypatch):
+    from threading import BoundedSemaphore
+    slots = BoundedSemaphore(2)
+    assert slots.acquire(False) and slots.acquire(False)
+    monkeypatch.setattr(rt, "_ADMISSION", slots)
+    classify = Mock()
+    monkeypatch.setattr(rt, "_classify", classify)
+    with pytest.raises(rt.PlannerBusy, match="queue full"):
+        rt.plan_readonly_task("show order")
+    classify.assert_not_called()
+
+
+def test_planning_wait_timeout_releases_admission(monkeypatch):
+    from threading import BoundedSemaphore, Lock
+    slots, lock = BoundedSemaphore(2), Lock()
+    assert lock.acquire(False)
+    monkeypatch.setattr(rt, "_ADMISSION", slots)
+    monkeypatch.setattr(rt, "_LOCK", lock)
+    monkeypatch.setattr(rt, "QUEUE_TIMEOUT", 0.01)
+    classify = Mock()
+    monkeypatch.setattr(rt, "_classify", classify)
+    try:
+        with pytest.raises(rt.PlannerBusy, match="queue timeout"):
+            rt.plan_readonly_task("show order")
+        classify.assert_not_called()
+        assert slots.acquire(False) and slots.acquire(False)
+    finally:
+        lock.release()
+
+
+def test_planner_failure_releases_resources(monkeypatch):
+    from threading import BoundedSemaphore, Lock
+    slots, lock = BoundedSemaphore(2), Lock()
+    monkeypatch.setattr(rt, "_ADMISSION", slots)
+    monkeypatch.setattr(rt, "_LOCK", lock)
+    monkeypatch.setattr(rt, "_classify", Mock(side_effect=rt.ModelUnavailable("offline")))
+    with pytest.raises(rt.ModelUnavailable):
+        rt.plan_readonly_task("show order")
+    assert lock.acquire(False)
+    lock.release()
+    assert slots.acquire(False) and slots.acquire(False)
