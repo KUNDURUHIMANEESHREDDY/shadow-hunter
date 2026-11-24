@@ -39,7 +39,7 @@
     button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #7597ec;outline-offset:2px}
     .security-pulse .grid{grid-template-columns:repeat(4,minmax(0,1fr));margin-top:16px;margin-bottom:0}
     @media(max-width:850px){.grid,.security-pulse .grid{grid-template-columns:repeat(2,1fr)}header{align-items:flex-start;flex-direction:column}.auth{width:100%;flex-wrap:wrap}.auth input{flex:1;width:auto}.settings-grid{grid-template-columns:1fr}}
-  
+
     :root{color-scheme:dark;color:#eef3f8;background:#0b1017}
     body{background:#0b1017} .shell{max-width:1440px;padding:28px 32px 70px}
     header{padding:0 0 24px;border-bottom:1px solid #263341;align-items:center}
@@ -55,7 +55,7 @@
     button{background:#72e1bf;color:#0d2924;border-color:#72e1bf;font-weight:650}button:not(:disabled):hover{background:#98f0d5}button.secondary{color:#eef3f8;background:#151f2b;border-color:#314051}button.secondary:not(:disabled):hover{background:#203041}
     th{background:#0d151f;color:#a1afbe}td,th{border-bottom-color:#253241}td{color:#d3dee7}tbody tr:hover{background:#182330}
     .pill{background:#283547;color:#d2dfea}.ALLOW,.APPROVED,.EXECUTED{background:#163b2e;color:#9bf0c5}.DENY,.REJECTED,.EXPIRED{background:#3d222a;color:#ffc1c8}.ESCALATE,.PENDING{background:#3d3020;color:#ffe0a2}
-    #message{color:#b5c3d0!important}.banner{background:#111923;border:1px solid #253241;border-radius:9px;padding:10px 13px}
+    #message{color:#b5c3d0}.banner{background:#111923;border:1px solid #253241;border-radius:9px;padding:10px 13px}
     button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid #72e1bf;outline-offset:3px}
     .grid{gap:14px}.setting-form{gap:8px}.table-wrap{border-radius:8px;border:1px solid #253241}
     @media(max-width:850px){.shell{padding:20px 16px 50px}.panel,.metric,.setting-card{padding:16px}}
@@ -220,7 +220,7 @@
     "unknown-tool": "Synthetic-only: a fictional AI agent requests a tool absent from its allowlist. Explain default-deny enforcement.",
     "approval-replay": "Synthetic-only: an already-consumed, fictional approval capability is presented a second time. Explain why execution must reject replay."
   });
-  const setMessage = (text, isError=false) => { $("message").textContent = text; $("message").style.color = isError ? "#9b2727" : "#667085"; };
+  const setMessage = (text, isError=false) => { $("message").textContent = text; $("message").style.color = isError ? "#ffc1c8" : "#b5c3d0"; };
   function clearSensitiveView() {
     // Also invalidate any in-flight load: an old response cannot repopulate data after sign-out.
     loadGeneration += 1;
