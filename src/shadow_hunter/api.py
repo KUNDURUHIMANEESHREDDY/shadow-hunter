@@ -567,17 +567,44 @@ def create_app(
         from .capability_catalog import discover_capabilities
         return {"capabilities":discover_capabilities()}
 
+    @app.get("/v1/agent/local-memory")
+    def list_local_memory(authorization: str | None = Header(default=None)):
+        principal = gateway_tool_principal(authorization)
+        require_local_runtime()
+        from .agent_memory import AgentMemory
+        return {"entries":AgentMemory(store).list(principal)}
+
+    @app.delete("/v1/agent/local-memory/{memory_id}")
+    def delete_local_memory(memory_id: str, authorization: str | None = Header(default=None)):
+        principal = gateway_tool_principal(authorization)
+        require_local_runtime()
+        from .agent_memory import AgentMemory
+        if not AgentMemory(store).delete(principal,memory_id):
+            raise HTTPException(status_code=404,detail="Memory entry not found")
+        return {"status":"deleted"}
+
+    @app.delete("/v1/agent/local-memory")
+    def clear_local_memory(authorization: str | None = Header(default=None)):
+        principal = gateway_tool_principal(authorization)
+        require_local_runtime()
+        from .agent_memory import AgentMemory
+        return {"deleted":AgentMemory(store).clear(principal)}
+
     @app.post("/v1/agent/local-workflows/plan")
     def plan_local_workflow(body: dict[str, Any] = Body(...),
                             authorization: str | None = Header(default=None)):
-        gateway_tool_principal(authorization)
+        principal = gateway_tool_principal(authorization)
         require_local_runtime()
         from .workflow_planner import plan_workflow
         from .local_runtime import LocalRuntimeError, public_runtime_error, InvalidPlan
-        if "objective" not in body or set(body)-{"objective","order_id"}:
+        if "objective" not in body or set(body)-{"objective","order_id","use_memory"} or type(body.get("use_memory",False)) is not bool:
             raise HTTPException(status_code=422,detail="Invalid objective")
         try:
-            return plan_workflow(body["objective"],body.get("order_id",""))
+            result=plan_workflow(body["objective"],body.get("order_id",""))
+            if body.get("use_memory") and result.get("status")=="preview":
+                from .agent_memory import AgentMemory
+                result["historical_context"]=AgentMemory(store).relevant(principal,result["nodes"])
+            return result
         except ValueError:
             raise HTTPException(status_code=422,detail="Invalid objective") from None
         except InvalidPlan:
@@ -592,12 +619,30 @@ def create_app(
         require_local_runtime()
         from .scheduler import execute_graph
         from .local_runtime import _WORKFLOW_SLOTS
-        if set(body)!={"nodes"}:
+        if "nodes" not in body or set(body)-{"nodes","remember"} or type(body.get("remember",False)) is not bool:
             raise HTTPException(status_code=422,detail="Invalid workflow")
         if not _WORKFLOW_SLOTS.acquire(blocking=False):
             raise HTTPException(status_code=429,detail="Workflow capacity reached")
         try:
-            return execute_graph(principal,gateway,body["nodes"])
+            memory=None
+            epoch=None
+            if body.get("remember"):
+                from .agent_memory import AgentMemory
+                try:
+                    memory=AgentMemory(store)
+                    epoch=memory.begin(principal)
+                except Exception:
+                    memory=None
+            result=execute_graph(principal,gateway,body["nodes"])
+            if body.get("remember") and memory is None:
+                result["memory_status"]="not_saved"
+            if memory is not None:
+                try:
+                    result["memory_id"]=memory.remember(principal,epoch,body["nodes"],result)
+                    result["memory_status"]="saved" if result["memory_id"] else "cleared_during_execution"
+                except Exception:
+                    result["memory_status"]="not_saved"
+            return result
         except ValueError:
             raise HTTPException(status_code=422,detail="Invalid workflow") from None
         finally:
