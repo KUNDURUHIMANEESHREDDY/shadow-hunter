@@ -208,7 +208,10 @@ def test_registry_conversion_and_external_allowlist(context,monkeypatch):
     assert queue.dispatch_next(a,gateway)["result"]["value"]=="2000"
     with pytest.raises(ValueError):
         queue.enqueue(a,"public_repo_metadata","https://example.com")
-    monkeypatch.setattr(module,"public_repo_metadata",lambda repo:{"status":"completed","repository":repo})
+    from shadow_hunter import result_verifier
+    evidence={"repository":"python/cpython","stars":10,"forks":2,"default_branch":"main"}
+    monkeypatch.setattr(module,"public_repo_metadata",lambda repo:{"status":"completed",**evidence})
+    monkeypatch.setattr(result_verifier,"repository_evidence",lambda repo:evidence)
     queue.enqueue(a,"public_repo_metadata","python/cpython")
     assert queue.dispatch_next(a,gateway)["result"]["repository"]=="python/cpython"
 

@@ -28,7 +28,7 @@ def test_transient_recovery_preserves_dependencies(monkeypatch):
         if capability=="public_repo_metadata" and calls.count((capability,resource))==1:
             raise recovery.TransientReadError("temporary")
         return {"status":"completed"}
-    monkeypatch.setattr(scheduler,"execute_capability",invoke)
+    monkeypatch.setattr(scheduler,"execute_verified_capability",invoke)
     result=scheduler.execute_graph(P,None,graph())
     assert result["status"]=="completed"
     assert result["recovery"]["attempts"]=={"repo":2,"independent":1,"dependent":1,"other_branch":1}
@@ -48,7 +48,7 @@ def test_independent_branch_progresses_during_retry(monkeypatch):
         if capability=="public_repo_metadata" and calls[(capability,resource)]==1:
             raise recovery.TransientReadError("temporary")
         return {"status":"completed"}
-    monkeypatch.setattr(scheduler,"execute_capability",invoke)
+    monkeypatch.setattr(scheduler,"execute_verified_capability",invoke)
     result=scheduler.execute_graph(P,None,graph())
     events=result["recovery"]["timeline"]
     independent=next(i for i,e in enumerate(events) if e["node"]=="other_branch" and e["state"]=="completed")
@@ -60,7 +60,7 @@ def test_persistent_failure_blocks_transitive_descendants(monkeypatch):
         if capability=="public_repo_metadata":
             raise recovery.TransientReadError("temporary")
         return {"status":"completed"}
-    monkeypatch.setattr(scheduler,"execute_capability",invoke)
+    monkeypatch.setattr(scheduler,"execute_verified_capability",invoke)
     nodes=graph()+[node("last","numeric_summary","1,2",["dependent"])]
     result=scheduler.execute_graph(P,None,nodes)
     assert result["status"]=="incomplete"
@@ -77,7 +77,7 @@ def test_no_retry_on_denied_or_unverified_support(monkeypatch,failure):
         if failure=="unknown": raise RuntimeError("secret audit error")
         if failure=="invalid": return {"status":"unexpected"}
         raise recovery.TransientReadError("not approved for retry")
-    monkeypatch.setattr(scheduler,"execute_capability",invoke)
+    monkeypatch.setattr(scheduler,"execute_verified_capability",invoke)
     result=scheduler.execute_graph(P,None,[node("a","order_summary","owned"),node("b","numeric_summary","1,2",["a"])])
     assert result["status"]=="incomplete"
     assert result["recovery"]["attempts"]=={"a":1,"b":0}
@@ -90,7 +90,7 @@ def test_disable_during_recovery(monkeypatch):
         calls.append(capability)
         monkeypatch.setenv("SHADOW_HUNTER_ENABLED_CAPABILITIES","numeric_summary")
         raise recovery.TransientReadError("temporary")
-    monkeypatch.setattr(scheduler,"execute_capability",invoke)
+    monkeypatch.setattr(scheduler,"execute_verified_capability",invoke)
     result=scheduler.execute_graph(P,None,[node("repo","public_repo_metadata","python/cpython")])
     assert calls==["public_repo_metadata"]
     assert result["nodes"]["repo"]["reason"]=="invalid_or_disabled_capability"
@@ -98,7 +98,7 @@ def test_disable_during_recovery(monkeypatch):
 
 def test_global_retry_budget(monkeypatch):
     monkeypatch.setattr(recovery,"MAX_RETRIES",2)
-    monkeypatch.setattr(scheduler,"execute_capability",lambda *a: (_ for _ in ()).throw(recovery.TransientReadError("temporary")))
+    monkeypatch.setattr(scheduler,"execute_verified_capability",lambda *a: (_ for _ in ()).throw(recovery.TransientReadError("temporary")))
     result=scheduler.execute_graph(P,None,[node(str(i),"public_repo_metadata","python/cpython") for i in range(8)])
     assert result["recovery"]["retries"]==2
     assert sum(result["recovery"]["attempts"].values())==10
@@ -112,7 +112,7 @@ def test_completed_does_not_wait_for_unrelated_slow_branch(monkeypatch):
         if resource=="3:kg_to_g":
             release.set()
         return {"status":"completed"}
-    monkeypatch.setattr(scheduler,"execute_capability",invoke)
+    monkeypatch.setattr(scheduler,"execute_verified_capability",invoke)
     result=scheduler.execute_graph(P,None,graph())
     assert result["status"]=="completed"
     assert release.is_set()

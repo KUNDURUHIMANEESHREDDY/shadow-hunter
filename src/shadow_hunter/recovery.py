@@ -7,6 +7,7 @@ prerequisites block their descendants; independent nodes continue.
 from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 import time
+from .result_verifier import VerificationError
 
 
 class TransientReadError(RuntimeError):
@@ -46,6 +47,8 @@ def run_graph(by_id, ledger, invoke, validate):
             if not isinstance(result,dict) or result.get("status") not in {"completed","denied"}:
                 return {"status":"failed","reason":"invalid_or_unverified_result"}
             return result
+        except VerificationError:
+            return {"status":"failed","reason":"independent_verification_failed"}
         except TransientReadError:
             if node["capability"] in RETRYABLE_CAPABILITIES:
                 return {"status":"retryable","reason":"temporary_read_failure"}

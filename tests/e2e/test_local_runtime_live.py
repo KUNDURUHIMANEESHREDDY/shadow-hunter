@@ -333,3 +333,17 @@ def test_agent_memory_browser(page,local_runtime_enabled,local_server):
     page.locator("#disconnect").click()
     expect(page.locator("#memory-list")).to_be_empty()
     assert not page.locator("#workflow-remember").is_checked()
+
+
+def test_independent_verification_browser(page,local_runtime_enabled,local_server):
+    from playwright.sync_api import expect
+    page.goto(local_server+"/local-workspace")
+    page.locator("#token").fill(CUSTOMER_TOKEN)
+    page.locator("#connect").click()
+    expect(page.locator("#status")).to_have_text("Connected to local account.")
+    page.locator("#workflow-example").click()
+    page.locator("#workflow-run").click()
+    expect(page.locator("#workflow-result")).to_contain_text("independent_rational_recalculation")
+    result=json.loads(page.locator("#workflow-result").inner_text())
+    assert result["status"]=="completed"
+    assert all(n["verification"]["status"]=="verified" for n in result["nodes"].values())

@@ -1,0 +1,7 @@
+# Step 6: independent result verification
+
+Added a deterministic verification boundary to graph and queued capability execution. Every successful registered capability requires a concrete verifier: rational arithmetic, current store and correlated policy audit records, a fresh loopback model probe, or separate fixed-origin public-source requests. Candidate success flags do not release dependencies. Evidence failures are non-retryable, result payloads are withheld on failure, and independent branches remain eligible to run. Support denials are audit checked and stripped of candidate business data.
+
+Validation: 96 focused tests passed, including 21 verifier tests, plus two browser tests. The verifier tests cover corrupted numeric values, false completion, mismatched account and trace, altered business result, denied payload suppression, fabricated external metadata and source unavailability. A separate live MCP workflow retrieved public package and repository metadata, independently corroborated both sources, and completed a verified dependent conversion. The temporary companion was stopped after the check.
+
+Limitations: fresh-source agreement is not independent proof of provider truth; changing metadata or temporary source unavailability can conservatively fail verification. Verification is scoped to registered read-only workflow and queue execution. No arbitrary action verification, cryptographically signed upstream receipts, persistent workflow checkpointing or production deployment. Full regression and publication remain separate release steps.

@@ -162,7 +162,7 @@ class DurableScheduler:
         status = "failed"
         result = None
         try:
-            result = execute_capability(principal,gateway,job["capability"],job["resource"])
+            result = execute_verified_capability(principal,gateway,job["capability"],job["resource"])
             trace = result.get("trace_id")
             status = result["status"]
             if status not in ("completed","denied"):
@@ -317,6 +317,12 @@ def execute_capability(principal,gateway,capability,resource):
     raise RuntimeError("No verified result")
 
 
+def execute_verified_capability(principal,gateway,capability,resource):
+    from .result_verifier import verify
+    result=execute_capability(principal,gateway,capability,resource)
+    return verify(principal,gateway,capability,resource,result)
+
+
 def validate_graph(nodes):
     """Validate the complete graph without performing any action."""
     from .orchestration import DependencyLedger
@@ -342,5 +348,5 @@ def execute_graph(principal,gateway,nodes):
     DurableScheduler.owner(principal)
     by_id,ledger=validate_graph(nodes)
     return run_graph(by_id,ledger,
-                     lambda capability,resource:execute_capability(principal,gateway,capability,resource),
+                     lambda capability,resource:execute_verified_capability(principal,gateway,capability,resource),
                      validate_resource)

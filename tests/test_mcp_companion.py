@@ -85,6 +85,9 @@ def test_disabled_after_plan(monkeypatch):
 @pytest.fixture
 def running_companion(monkeypatch):
     import uvicorn
+    from shadow_hunter import result_verifier
+    monkeypatch.setattr(result_verifier,"package_evidence",lambda package:{"package":package,"version":"1.2.3"})
+    monkeypatch.setattr(result_verifier,"repository_evidence",lambda repo:{"repository":repo,"stars":10,"forks":2,"default_branch":"main"})
     monkeypatch.setattr(companion,"read_package",lambda package:{"status":"completed","package":package,"version":"1.2.3"})
     monkeypatch.setattr(scheduler,"public_repo_metadata",lambda repo:{"status":"completed","repository":repo,"stars":10,"forks":2,"default_branch":"main"})
     sock=socket.socket()
