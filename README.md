@@ -277,6 +277,12 @@ does not claim live two-tenant OAuth/OBO sign-off or a deployed AgentCore Harnes
 
 See [keyless authentication setup and test gates](docs/keyless-auth.md).
 
+## Local read-only orchestration — 24 November 2026
+
+The local workspace supports authenticated order details and refund eligibility through the deterministic tool gateway. Compound reads now recover once from inconsistent results, discard stale response data and independently verify the fresh pair under the original trace with distinct request IDs. Denials and missing or mismatched audit evidence never trigger recovery. Task history counts only the active attempt; the audit trail retains both attempts.
+
+Targeted Python 3.11 verification on the isolated checkout: **49 passed** across local runtime, read-only QA, gateway and policy tests; git diff check passed. The planner still uses a fixed support-intent catalog. General-purpose planning, live-model recovery testing and the full regression suite remain unverified in this cycle. No AWS deployment or new resources were involved.
+
 ## Local development
 
 Python 3.11+ is required. Install the API and optional AWS SDK with `python -m pip install -e ".[server,aws,dev]"`, then start the local API with `shadow-hunter-api`. The API listens on `127.0.0.1:8000` by default and serves the operator console at `/operator`.
