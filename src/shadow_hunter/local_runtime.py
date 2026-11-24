@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 import urllib.error
@@ -37,28 +38,26 @@ def _classify(prompt: str, *, review: bool, deadline: float) -> str:
         "additionalProperties": False,
     }
     instructions = (
-        "Classify the ENTIRE read-only support request, not just its first clause. "
-        "Choose both when it asks to view order information AND check refund eligibility. "
-        "Choose order_details only for order information alone; refund_eligibility "
-        "only for eligibility alone. For writes or unrelated requests choose unsupported. "
-        "A request not to submit a refund is still read-only. Examples: "
-        "Show order details and check eligibility -> both. "
-        "Show my order -> order_details. Can I get a refund? -> refund_eligibility. "
-        "Check refund eligibility and show the order -> both. Return only JSON."
+        "Classify the entire request into exactly one intent. Only read-only customer support. "
+        "order_details: show purchase/order information, currency, remaining refundable amount. "
+        "refund_eligibility: check whether the purchase can be refunded or qualifies. "
+        "both: the request asks for both kinds of information. "
+        "unsupported: unrelated task or any request to actually change data. "
+        "Distinguish how much (order_details) from whether possible (refund_eligibility). "
+        "Look at all clauses before choosing. Examples: "
+        "How much remains refundable? -> order_details. What currency? -> order_details. "
+        "Can my purchase be refunded? -> refund_eligibility. "
+        "Show purchase details and tell me whether it qualifies -> both. "
+        "Get the order and see if I can get a refund -> both. "
+        "Show the currency and check eligibility -> both. "
+        "Explain a math concept -> unsupported. Write a story -> unsupported. "
+        "Submit a refund -> unsupported. Return JSON only."
     )
     if review:
-        instructions = (
-            "You independently verify coverage of a read-only customer support request. "
-            "There are exactly four intents. If BOTH order details and refund eligibility "
-            "are requested, select both. Do not omit the second requested read. "
-            "For order information alone choose order_details. For an eligibility check alone "
-            "choose refund_eligibility. If an actual change is requested or the request "
-            "is unrelated choose unsupported. Examples: "
-            "Show my order details and check refund eligibility -> both. "
-            "Check whether I qualify and show my order details -> both. "
-            "Show my order -> order_details. "
-            "Check whether I qualify for a refund without submitting -> refund_eligibility. "
-            "Submit a refund -> unsupported. Return exactly one JSON intent."
+        instructions += (
+            " As the coverage reviewer, choose both when the request combines two "
+            "different kinds of read, even if the clauses are phrased differently. "
+            "Do not infer a support request from unrelated text."
         )
     for attempt in range(2):
         remaining = deadline - time.monotonic()
@@ -104,6 +103,14 @@ def _classify(prompt: str, *, review: bool, deadline: float) -> str:
                 raise InvalidPlan("Invalid local plan after bounded retry") from None
     raise InvalidPlan("Invalid local plan")
 
+def _obvious_compound_read(prompt: str) -> bool:
+    """Conservative coverage check only: it may stop, never expand authority."""
+    text = prompt.casefold()
+    details = re.search(r"\b(?:order|purchase)\s+(?:details|information|currency)\b|\b(?:show|retrieve|view|get)\b.{0,32}\b(?:order|purchase)\b", text)
+    eligibility = re.search(r"\b(?:eligibility|eligible|qualifies|qualify|can be refunded|can .*?be refunded|refund is possible|refund is available)\b", text)
+    return bool(details and eligibility)
+
+
 def plan_readonly_task(prompt: str) -> str:
     if not _LOCK.acquire(blocking=False):
         raise LocalRuntimeError("Local model busy")
@@ -112,7 +119,11 @@ def plan_readonly_task(prompt: str) -> str:
         proposal = _classify(prompt, review=False, deadline=deadline)
         review = _classify(prompt, review=True, deadline=deadline)
         # Agreement is a quality check, never authorization or proof of intent.
-        return proposal if proposal == review else "clarify"
+        if proposal != review:
+            return "clarify"
+        if proposal != "both" and _obvious_compound_read(prompt):
+            return "clarify"
+        return proposal
     finally:
         _LOCK.release()
 
@@ -167,7 +178,27 @@ def iter_readonly_task(gateway: ToolGateway, principal: Principal, *,
     steps = []
     timeline = [{"stage": "planning", "status": "reviewed"}]
     def response(status: str) -> dict[str, Any]:
-        return {"model": MODEL, "status": status, "trace_id": trace,
+        if status == "completed":
+            messages = []
+            for step in steps:
+                data = step["result"]
+                if step["tool"] == "get_order":
+                    order = data["order"]
+                    messages.append("Order details verified. Refundable balance: "
+                                    + str(order["refundable_minor"]) + " minor units ("
+                                    + order["currency"] + ").")
+                elif step["tool"] == "check_refund_eligibility":
+                    eligibility = data["eligibility"]
+                    messages.append("Refund eligibility: "
+                                    + ("eligible." if eligibility["eligible"] else "not eligible."))
+            answer = " ".join(messages)
+        else:
+            answer = {
+                "denied": "The requested resource is not available to this account.",
+                "unsupported": "This workspace supports order information and refund eligibility reads only.",
+                "clarify": "The task could not be interpreted consistently. Please rephrase it.",
+            }[status]
+        return {"answer": answer, "model": MODEL, "status": status, "trace_id": trace,
                 "plan": plan, "steps": steps, "timeline": timeline,
                 "verified_steps": len(steps)}
     yield {"type": "progress", "stage": "planning", "status": "reviewed", "plan": plan, "trace_id": trace}
@@ -209,3 +240,32 @@ def run_readonly_task(gateway: ToolGateway, principal: Principal, *,
         if event["type"] == "result":
             return event["result"]
     raise LocalRuntimeError("Task ended without a verified result")
+
+
+def tracked_readonly_task(gateway: ToolGateway, principal: Principal, *,
+                          prompt: str, order_id: str) -> Iterator[dict[str, Any]]:
+    """Persist only minimal account-scoped task metadata, never prompt/results."""
+    trace = None
+    steps = 0
+    finalized = False
+    try:
+        for event in iter_readonly_task(gateway, principal, prompt=prompt, order_id=order_id):
+            if trace is None:
+                new_trace = event["trace_id"]
+                gateway.store.begin_local_task(principal, new_trace)
+                trace = new_trace
+            if event["type"] == "progress" and event.get("stage") == "tool" and event.get("status") == "verified":
+                steps += 1
+            if event["type"] == "result":
+                result = event["result"]
+                gateway.store.finish_local_task(principal, trace, result["status"], result["verified_steps"])
+                finalized = True
+            yield event
+    except Exception:
+        if trace is not None and not finalized:
+            gateway.store.finish_local_task(principal, trace, "failed", steps)
+            finalized = True
+        raise
+    finally:
+        if trace is not None and not finalized:
+            gateway.store.finish_local_task(principal, trace, "interrupted", steps)

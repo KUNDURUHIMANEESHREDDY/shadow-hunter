@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Shadow Hunter | Local workspace</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#111923;color:#e8eef6}*{box-sizing:border-box}body{margin:0}header,main{max-width:1120px;margin:auto;padding:24px}header{display:flex;justify-content:space-between;align-items:center}header a{color:#aac8f4}h1{font-size:clamp(1.8rem,4vw,2.7rem);margin:0 0 10px}p{color:#aab8ca;line-height:1.5}section{background:#1a2533;border:1px solid #304054;border-radius:16px;padding:22px;margin-bottom:18px}.columns{display:grid;grid-template-columns:1fr 1fr;gap:18px}label{display:block;margin-top:12px;font-size:.9rem}input,textarea{width:100%;background:#111923;color:#e8eef6;border:1px solid #455870;border-radius:8px;padding:12px;font:inherit;margin-top:6px}textarea{min-height:100px;resize:vertical}button{background:#b4d2fb;color:#132237;border:0;border-radius:8px;padding:11px 16px;font:inherit;font-weight:650;cursor:pointer;margin-top:14px}button:disabled{opacity:.5}button.secondary{background:#34465d;color:white}li{padding:8px 0;overflow-wrap:anywhere}ol{padding-left:24px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#111923;border-radius:8px;padding:12px;font-size:.85rem}table{width:100%;border-collapse:collapse;font-size:.85rem}th,td{text-align:left;border-bottom:1px solid #34465d;padding:9px 5px}td:first-child{overflow-wrap:anywhere}small{color:#aab8ca}#status{min-height:24px}h2{font-size:1.1rem;margin-top:0}@media(max-width:760px){.columns{grid-template-columns:1fr}main,header{padding:16px}}
+</style></head><body>
+<header><strong>SHADOW HUNTER / LOCAL</strong><a href="operator">Operator console</a></header>
+<main><h1>Local support workspace</h1><p>Read-only tasks with Qwen 3.5 0.8B. Every executed tool is policy-checked and its evidence verified. Use fictional records in a local development environment.</p>
+<section><h2>Local account access</h2><label for="token">Local customer token</label><input id="token" type="password" autocomplete="off" spellcheck="false"><button id="connect">Connect</button> <button class="secondary" id="disconnect" disabled>Disconnect</button><p id="status" role="status" aria-live="polite">Not connected.</p><small>Token stays in this tab's memory and is never stored in history.</small></section>
+<div class="columns"><section><h2>New task</h2><label for="order">Order ID</label><input id="order" maxlength="128" autocomplete="off"><label for="prompt">Request</label><textarea id="prompt" maxlength="1000" placeholder="Show my order and check refund eligibility."></textarea><button id="run" disabled>Run task</button> <button id="stop" class="secondary" disabled>Stop viewing</button><p><small>Stopping the stream does not guarantee that an in-flight read has stopped.</small></p><h2>Verified result</h2><p id="answer" aria-live="polite"></p><pre id="result" aria-live="polite">No result yet.</pre></section>
+<section><h2>Live activity</h2><ol id="activity" aria-live="polite"></ol><small>Completion requires a terminal verified result, not just a progress event.</small></section></div>
+<section><h2>Task history</h2><button id="refresh" class="secondary" disabled>Refresh history</button><p><small>Only status, timestamps, trace ID and verified step count are persisted. A running entry after an interruption is not proof of active execution.</small></p><table><thead><tr><th>Trace</th><th>Status</th><th>Verified steps</th><th>Updated</th></tr></thead><tbody id="history"></tbody></table></section>
+</main><script>
+(() => {
+"use strict";
+const $ = id => document.getElementById(id);
+const base = location.pathname.replace(/\/local-workspace\/?$/, "");
+let token="", generation=0, controller=null;
+const status = text => $("status").textContent=text;
+const headers = () => ({"Authorization":"Bearer "+token,"Content-Type":"application/json"});
+function setConnected(on) {$("run").disabled=!on;$("refresh").disabled=!on;$("disconnect").disabled=!on;}
+async function history() {
+  if(!token)return;
+  const gen=generation;
+  const r=await fetch(base+"/v1/agent/local-readonly/history",{headers:headers(),cache:"no-store"});
+  if(!r.ok)throw Error("History unavailable");
+  const data=await r.json();
+  if(gen!==generation)return;
+  $("history").replaceChildren();
+  for(const task of data.tasks){
+    const tr=document.createElement("tr");
+    for(const value of [task.trace_id,task.status,task.verified_steps,task.updated_at]){
+      const td=document.createElement("td");td.textContent=String(value);tr.append(td);
+    }
+    $("history").append(tr);
+  }
+}
+function disconnect(){
+  generation++;if(controller)controller.abort();controller=null;token="";
+  for(const id of ["token","order","prompt"])$(id).value="";
+  $("activity").replaceChildren();$("history").replaceChildren();$("result").textContent="No result yet.";$("answer").textContent="";
+  $("stop").disabled=true;setConnected(false);status("Not connected.");
+}
+$("connect").onclick=async()=>{
+  disconnectForConnect();
+  token=$("token").value.trim();$("token").value="";
+  if(!token){status("Enter a local customer token.");return;}
+  const gen=generation;
+  try{await history();if(gen!==generation)return;setConnected(true);status("Connected to local account.");}
+  catch{if(gen===generation){disconnect();status("Local authentication failed.");}}
+};
+function disconnectForConnect(){
+  generation++;if(controller)controller.abort();controller=null;token="";setConnected(false);
+  $("activity").replaceChildren();$("history").replaceChildren();$("result").textContent="No result yet.";$("answer").textContent="";$("order").value="";$("prompt").value="";$("stop").disabled=true;
+}
+$("disconnect").onclick=disconnect;
+$("refresh").onclick=()=>history().catch(()=>status("History unavailable."));
+$("stop").onclick=()=>{if(controller)controller.abort();};
+$("run").onclick=async()=>{
+  if(!token||controller)return;
+  const prompt=$("prompt").value.trim(),order_id=$("order").value.trim();
+  if(!prompt||!order_id){status("Enter an order ID and request.");return;}
+  const gen=generation, active=new AbortController();controller=active;
+  $("run").disabled=true;$("stop").disabled=false;$("activity").replaceChildren();$("result").textContent="Task in progress.";$("answer").textContent="";
+  let final=false;
+  function event(data){
+    if(gen!==generation||active.signal.aborted||final)return;
+    if(data.type==="progress"){
+      const li=document.createElement("li");
+      li.textContent=[data.stage,data.tool,data.status].filter(Boolean).join(" / ");
+      $("activity").append(li);
+    } else if(data.type==="result"){
+      final=true; const result=data.result;
+      $("answer").textContent=typeof result.answer==="string"?result.answer:"";$("result").textContent=JSON.stringify(result,null,2);status("Task status: "+result.status);
+    } else if(data.type==="error"){
+      final=true;$("result").textContent="Task failed verification.";status("Task failed.");
+    }
+  }
+  try{
+    const r=await fetch(base+"/v1/agent/local-readonly/stream",{method:"POST",headers:headers(),body:JSON.stringify({prompt,order_id}),signal:active.signal,cache:"no-store"});
+    if(!r.ok||!r.body)throw Error("Request unavailable");
+    const reader=r.body.getReader(),decoder=new TextDecoder();let buffer="";
+    while(true){
+      const {done,value}=await reader.read();
+      if(done)break;
+      buffer+=decoder.decode(value,{stream:true});
+      let i;while((i=buffer.indexOf("\n"))>=0){const line=buffer.slice(0,i);buffer=buffer.slice(i+1);if(line.trim())event(JSON.parse(line));}
+      if(buffer.length>131072)throw Error("Invalid event");
+    }
+    if(!final&&gen===generation)$("result").textContent="Stream ended without a terminal result. Completion not confirmed.";
+  }catch{if(gen===generation)$("result").textContent="Connection stopped or task unavailable. Completion not confirmed.";}
+  finally{if(gen===generation){controller=null;$("stop").disabled=true;$("run").disabled=false;await history().catch(()=>{});}}
+};
+})();
+</script></body></html>

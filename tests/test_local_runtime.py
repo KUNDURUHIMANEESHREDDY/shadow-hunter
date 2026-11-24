@@ -148,3 +148,50 @@ def test_stream_failure_never_yields_completed(monkeypatch, runtime):
         while True:
             seen.append(next(stream))
     assert not any(e["type"] == "result" for e in seen)
+
+def test_tracked_history_persists_and_is_account_scoped(monkeypatch, runtime):
+    from shadow_hunter.store import SQLiteStore
+    from shadow_hunter.policy import Principal
+    gateway, principal = runtime
+    monkeypatch.setattr(rt, "plan_readonly_task", lambda prompt: "both")
+    events=list(rt.tracked_readonly_task(gateway, principal, prompt="view and check", order_id="sample-order"))
+    result=events[-1]["result"]
+    reopened=SQLiteStore(gateway.store.database_path)
+    rows=reopened.list_local_tasks(principal)
+    assert len(rows)==1 and rows[0]["trace_id"]==result["trace_id"]
+    assert rows[0]["status"]=="completed" and rows[0]["verified_steps"]==2
+    assert set(rows[0])=={"trace_id","status","verified_steps","created_at","updated_at"}
+    assert reopened.list_local_tasks(Principal("other-subject",principal.tenant_id,principal.customer_id,True))==[]
+    assert reopened.list_local_tasks(Principal(principal.subject_id,"other-tenant",principal.customer_id,True))==[]
+
+def test_tracked_history_interrupted(monkeypatch, runtime):
+    gateway, principal = runtime
+    planner=Mock(return_value="both")
+    monkeypatch.setattr(rt, "plan_readonly_task", planner)
+    stream=rt.tracked_readonly_task(gateway, principal, prompt="view and check", order_id="sample-order")
+    first=next(stream)
+    assert gateway.store.list_local_tasks(principal)[0]["status"]=="running"
+    stream.close()
+    planner.assert_not_called()
+    row=gateway.store.list_local_tasks(principal)[0]
+    assert row["trace_id"]==first["trace_id"] and row["status"]=="interrupted"
+
+def test_tracked_history_failure(monkeypatch, runtime):
+    gateway, principal=runtime
+    monkeypatch.setattr(rt,"plan_readonly_task", Mock(side_effect=rt.LocalRuntimeError("offline")))
+    with pytest.raises(rt.LocalRuntimeError):
+        list(rt.tracked_readonly_task(gateway,principal,prompt="view",order_id="sample-order"))
+    row=gateway.store.list_local_tasks(principal)[0]
+    assert row["status"]=="failed" and row["verified_steps"]==0
+
+
+def test_compound_coverage_guard_stops_partial_plan(monkeypatch):
+    monkeypatch.setattr(rt, "_classify", Mock(return_value="order_details"))
+    assert rt.plan_readonly_task("Show my purchase details and check if it can be refunded.")=="clarify"
+
+def test_verified_answer_uses_gateway_data(monkeypatch,runtime):
+    gateway,principal=runtime
+    monkeypatch.setattr(rt,"plan_readonly_task",lambda prompt:"both")
+    result=rt.run_readonly_task(gateway,principal,prompt="view and check",order_id="sample-order")
+    assert "1000 minor units (USD)" in result["answer"]
+    assert "eligible" in result["answer"]

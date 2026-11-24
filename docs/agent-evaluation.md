@@ -467,3 +467,31 @@ read-only API stream, not an unrestricted agent or a dashboard integration.
 Live opt-in checks cover six ordinary support prompts, including alternate
 wording and reversed clause order. Regression tests check that progress
 precedes work and invalid evidence never yields a completed result.
+
+### Local workspace and persistent task history
+
+With the same opt-in local runtime configuration, open the application's
+`/local-workspace` page and enter an existing local customer token. The
+workspace consumes the NDJSON stream and displays stage progress and the
+terminal result. Tokens stay in tab memory. History is retrieved from
+`GET /v1/agent/local-readonly/history` and is scoped to authenticated
+subject, tenant and customer. SQLite persists only trace ID, outcome,
+timestamps and verified-step count; no prompt, order ID, credential or
+tool payload is stored in the task history. Interrupted streams are
+marked when their generator closes; an abrupt process crash can leave
+a running record. Running records are not proof of active execution.
+The history endpoint returns the latest 30 entries.
+
+The supported read-only question families now include order information,
+currency, refundable balance, eligibility, and compound requests. Answers
+are rendered deterministically from verified gateway results, not model
+claims. The model's two classifications still must agree; a conservative
+compound-coverage guard can stop an incomplete proposed plan. This is
+not proof of complete semantic understanding.
+
+The explicit opt-in language benchmark contains nine supported prompts
+and three unrelated prompts. It reports exact intent separately from
+workflow success. For unrelated prompts, clarification with no tools
+is safe nonexecution but is not an exact unsupported classification.
+The benchmark is a small development corpus, not a general reliability
+or production certification.

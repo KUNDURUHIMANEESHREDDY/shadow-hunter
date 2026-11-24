@@ -84,6 +84,19 @@ class SQLiteStore:
         with self._reader() as conn:
             conn.executescript(
                 """
+                CREATE TABLE IF NOT EXISTS local_task_history (
+                    trace_id TEXT PRIMARY KEY,
+                    subject_id TEXT NOT NULL,
+                    tenant_id TEXT NOT NULL,
+                    customer_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    verified_steps INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS local_task_history_owner
+                    ON local_task_history(tenant_id, customer_id, subject_id, created_at DESC);
+
                 CREATE TABLE IF NOT EXISTS orders (
                     order_id TEXT PRIMARY KEY,
                     tenant_id TEXT NOT NULL,
@@ -960,6 +973,33 @@ class SQLiteStore:
             "trace_id": row["trace_id"] or refund_request_id,
             "request_id": row["request_id"] or refund_request_id,
         }
+
+    def begin_local_task(self, principal: Principal, trace_id: str) -> None:
+        now = iso_now()
+        with self._transaction() as conn:
+            conn.execute(
+                "INSERT INTO local_task_history(trace_id, subject_id, tenant_id, customer_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'running', ?, ?)",
+                (trace_id, principal.subject_id, principal.tenant_id, principal.customer_id, now, now),
+            )
+
+    def finish_local_task(self, principal: Principal, trace_id: str, status: str, verified_steps: int) -> None:
+        if status not in {"completed", "denied", "unsupported", "clarify", "failed", "interrupted"} or type(verified_steps) is not int or not 0 <= verified_steps <= 2:
+            raise StoreError("Invalid local task outcome")
+        with self._transaction() as conn:
+            cursor = conn.execute(
+                "UPDATE local_task_history SET status=?, verified_steps=?, updated_at=? WHERE trace_id=? AND subject_id=? AND tenant_id=? AND customer_id=? AND status='running'",
+                (status, verified_steps, iso_now(), trace_id, principal.subject_id, principal.tenant_id, principal.customer_id),
+            )
+            if cursor.rowcount != 1:
+                raise StoreError("Local task history transition failed")
+
+    def list_local_tasks(self, principal: Principal, limit: int = 30) -> list[dict[str, Any]]:
+        with self._reader() as conn:
+            rows = conn.execute(
+                "SELECT trace_id,status,verified_steps,created_at,updated_at FROM local_task_history WHERE subject_id=? AND tenant_id=? AND customer_id=? ORDER BY created_at DESC LIMIT ?",
+                (principal.subject_id, principal.tenant_id, principal.customer_id, max(1, min(100, limit))),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def get_trace_events(self, trace_id: str, limit: int = 200) -> list[dict[str, Any]]:
         with self._reader() as conn:

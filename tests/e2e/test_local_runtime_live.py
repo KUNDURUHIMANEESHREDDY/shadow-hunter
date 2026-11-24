@@ -78,3 +78,76 @@ def test_local_runtime_stream_validates_before_stream(local_runtime_enabled, loc
     with pytest.raises(HTTPError) as exc:
         urllib.request.urlopen(req, timeout=5)
     assert exc.value.code==422
+"""Real browser checks for the local workspace. Opt-in requires local Qwen and Edge."""
+import json
+import os
+import urllib.request
+import pytest
+from .conftest import CUSTOMER_TOKEN, FOREIGN_TOKEN, OWN_ORDER
+
+@pytest.mark.skipif(os.environ.get("RUN_LOCAL_QWEN_E2E")!="1", reason="Explicit local Qwen opt-in")
+def test_workspace_in_real_browser(local_runtime_enabled, local_server):
+    from playwright.sync_api import sync_playwright, expect
+    with sync_playwright() as p:
+        browser=p.chromium.launch(channel="msedge",headless=True)
+        try:
+            page=browser.new_page()
+            page.goto(local_server+"/local-workspace")
+            page.locator("#token").fill(CUSTOMER_TOKEN)
+            page.locator("#connect").click()
+            expect(page.locator("#status")).to_have_text("Connected to local account.")
+            page.locator("#order").fill(OWN_ORDER)
+            page.locator("#prompt").fill("Show my order details and check refund eligibility.")
+            page.locator("#run").click()
+            expect(page.locator("#activity")).to_contain_text("planning / started",timeout=10000)
+            expect(page.locator("#status")).to_have_text("Task status: completed",timeout=60000)
+            result=json.loads(page.locator("#result").inner_text())
+            assert result["verified_steps"]==2
+            expect(page.locator("#history")).to_contain_text(result["trace_id"],timeout=5000)
+            expect(page.locator("#history")).to_contain_text("completed")
+            assert page.evaluate("() => localStorage.length + sessionStorage.length")==0
+            page.locator("#disconnect").click()
+            expect(page.locator("#history")).to_be_empty()
+            expect(page.locator("#result")).to_have_text("No result yet.")
+            page.locator("#token").fill(FOREIGN_TOKEN)
+            page.locator("#connect").click()
+            expect(page.locator("#status")).to_have_text("Connected to local account.")
+            expect(page.locator("#history")).to_be_empty()
+        finally:
+            browser.close()
+
+
+@pytest.mark.skipif(os.environ.get("RUN_LOCAL_QWEN_E2E")!="1", reason="Explicit local Qwen opt-in")
+def test_local_runtime_language_benchmark(local_runtime_enabled, local_server):
+    cases = [
+        ("Please show my order.", ["get_order"]),
+        ("Which currency is my order in?", ["get_order"]),
+        ("What is the remaining refundable balance on my order?", ["get_order"]),
+        ("Can this order be refunded?", ["check_refund_eligibility"]),
+        ("Check if a refund is available, without making changes.", ["check_refund_eligibility"]),
+        ("Am I eligible for a refund on this purchase?", ["check_refund_eligibility"]),
+        ("Please retrieve my order and confirm whether a refund is possible.", ["get_order","check_refund_eligibility"]),
+        ("Show my purchase details and check if it can be refunded.", ["get_order","check_refund_eligibility"]),
+        ("Show the order currency and check refund eligibility.", ["get_order","check_refund_eligibility"]),
+        ("Explain what a prime number is.", []),
+        ("Tell me a joke.", []),
+        ("Write a poem about a tree.", []),
+    ]
+    outcomes=[]
+    exact=[]
+    for prompt, expected in cases:
+        try:
+            r=post(local_server,prompt)
+            actual=[s["tool"] for s in r["steps"]]
+            strict=(r["status"]=="completed" and actual==expected and r["verified_steps"]==len(expected)) if expected else (r["status"]=="unsupported" and not actual)
+            ok=strict if expected else (r["status"] in {"unsupported","clarify"} and not actual and r["verified_steps"]==0)
+            exact.append(strict)
+            outcomes.append(ok)
+            print(json.dumps({"task":prompt,"status":r["status"],"expected":expected,"actual":actual,"workflow_pass":ok,"exact_intent_pass":strict}),flush=True)
+        except Exception as exc:
+            outcomes.append(False)
+            exact.append(False)
+            print(json.dumps({"task":prompt,"error":type(exc).__name__,"pass":False}),flush=True)
+    print("WORKFLOW BENCHMARK: "+str(sum(outcomes))+"/"+str(len(outcomes)),flush=True)
+    print("EXACT INTENT BENCHMARK: "+str(sum(exact))+"/"+str(len(exact)),flush=True)
+    assert all(outcomes)

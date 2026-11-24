@@ -119,7 +119,7 @@ def create_app(
         # Operator and agent responses can contain audit evidence or other
         # account-scoped information. Do not let browsers/shared caches retain
         # API data across sign-out, expired tokens, or account switches.
-        if request.url.path in {"/operator", "/customer", "/operator/config", "/customer/config"} or request.url.path.startswith(("/operator/", "/customer/", "/v1/")):
+        if request.url.path in {"/operator", "/customer", "/operator/config", "/customer/config", "/local-workspace"} or request.url.path.startswith(("/operator/", "/customer/", "/v1/")):
             response.headers["Cache-Control"] = "no-store"
             response.headers["Pragma"] = "no-cache"
         return response
@@ -462,8 +462,7 @@ def create_app(
             ) from exc
         return {"provider": "band", "published": True, "summary_only": True}
 
-    def local_task_inputs(body, authorization):
-        principal = gateway_tool_principal(authorization)
+    def require_local_runtime():
         if (
             os.environ.get("SHADOW_HUNTER_LOCAL_READONLY_ENABLED", "").lower() != "true"
             or os.environ.get("SHADOW_HUNTER_AUTH_MODE", "local").lower() != "local"
@@ -471,6 +470,10 @@ def create_app(
             or os.environ.get("AWS_LAMBDA_FUNCTION_NAME")
         ):
             raise HTTPException(status_code=503, detail="Local read-only runtime disabled")
+
+    def local_task_inputs(body, authorization):
+        principal = gateway_tool_principal(authorization)
+        require_local_runtime()
         if set(body) != {"prompt", "order_id"}:
             raise HTTPException(status_code=422, detail="Expected prompt and order_id")
         prompt, order_id = body["prompt"], body["order_id"]
@@ -480,18 +483,32 @@ def create_app(
             raise HTTPException(status_code=422, detail="Invalid local task")
         return principal, prompt, order_id
 
+    @app.get("/local-workspace")
+    def local_workspace():
+        require_local_runtime()
+        return FileResponse(WEB_ROOT / "local-workspace.html", headers={"Cache-Control": "no-store"})
+
+    @app.get("/v1/agent/local-readonly/history")
+    def local_task_history(authorization: str | None = Header(default=None)):
+        principal = gateway_tool_principal(authorization)
+        require_local_runtime()
+        return {"tasks": store.list_local_tasks(principal)}
+
     @app.post("/v1/agent/local-readonly")
     def local_readonly_chat(
         body: dict[str, Any] = Body(...),
         authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
-        from .local_runtime import LocalRuntimeError, run_readonly_task
+        from .local_runtime import LocalRuntimeError, tracked_readonly_task
         principal, prompt, order_id = local_task_inputs(body, authorization)
         try:
-            return run_readonly_task(gateway, principal, prompt=prompt, order_id=order_id)
+            for event in tracked_readonly_task(gateway, principal, prompt=prompt, order_id=order_id):
+                if event["type"] == "result":
+                    return event["result"]
+            raise LocalRuntimeError("No final result")
         except ValueError as exc:
             raise HTTPException(status_code=422, detail="Invalid local task") from exc
-        except (LocalRuntimeError, GatewayError):
+        except (LocalRuntimeError, GatewayError, StoreError):
             raise HTTPException(status_code=503, detail="Local task could not complete") from None
 
     @app.post("/v1/agent/local-readonly/stream")
@@ -500,11 +517,11 @@ def create_app(
         authorization: str | None = Header(default=None),
     ):
         import json
-        from .local_runtime import LocalRuntimeError, iter_readonly_task
+        from .local_runtime import LocalRuntimeError, tracked_readonly_task
         principal, prompt, order_id = local_task_inputs(body, authorization)
         def events():
             try:
-                for event in iter_readonly_task(gateway, principal, prompt=prompt, order_id=order_id):
+                for event in tracked_readonly_task(gateway, principal, prompt=prompt, order_id=order_id):
                     yield json.dumps(event, ensure_ascii=True) + "\n"
             except (LocalRuntimeError, GatewayError, StoreError, ValueError):
                 yield json.dumps({"type": "error", "status": "failed", "message": "Task could not be verified"}) + "\n"
