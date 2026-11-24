@@ -303,6 +303,14 @@ The authenticated read-only support workspace now explains refund eligibility fr
 
 Verification: the prior main baseline passed **438 non-browser regression tests**. The updated isolated Windows checkout passed **75 targeted tests** and the complete non-browser suite (**443 passed in 50.38 seconds**). Five added tests cover evidence-based eligibility explanations, inconsistent results and overlapping independent synthetic customer workflows with separate audit traces, task histories and account data. The concurrent isolation test uses a mocked planner and real policy gateway/SQLite store; it does not demonstrate concurrent model inference or a new parallel scheduler. The model planner and dependent policy operations remain serial. Browser/live-model tests passed in the preceding cycle and were not rerun for this change. No AWS resources were involved.
 
+## Local model readiness and bounded planning — 24 November 2026
+
+The authenticated local read-only workspace exposes a model readiness check and distinguishes unavailable Ollama from a missing required model. The probe checks the loopback model-list endpoint only and does not guarantee inference success. Start Ollama locally with `ollama serve` if the service is unavailable; the web application never starts processes or downloads models. The dashboard displays sanitized model-unavailable and planner-busy messages.
+
+Planning admission is bounded per process to one active planner and one waiting request, with a five-second queue wait and the existing 45-second planning budget. Full admission rejects additional requests. Admission and planning locks are released on failure. This is not a FIFO distributed scheduler, parallel inference, or guaranteed cancellation of an in-flight request. The tool allowlist and sequential dependent policy checks are unchanged.
+
+Verification on an isolated Windows checkout: **84 targeted runtime/gateway/policy tests passed**; git diff check passed for the implementation commit. The existing local Ollama server was reachable and the required Qwen model detected; no model download or server restart was necessary. **9 live local HTTP/stream/browser tests passed in 56.82 seconds**, including authenticated readiness, language benchmark (12/12 workflow outcomes; 11/12 exact intents) and intent-boundary benchmark (12/12). The full repository-wide suite was not rerun for these changes. Broader authorized support capabilities and guaranteed in-flight cancellation remain pending. No AWS resources were involved.
+
 ## Local development
 
 Python 3.11+ is required. Install the API and optional AWS SDK with `python -m pip install -e ".[server,aws,dev]"`, then start the local API with `shadow-hunter-api`. The API listens on `127.0.0.1:8000` by default and serves the operator console at `/operator`.
