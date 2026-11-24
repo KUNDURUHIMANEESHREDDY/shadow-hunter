@@ -297,6 +297,12 @@ Verification on a clean isolated Windows checkout: **72 targeted regression test
 
 The benchmark corpus is limited to the supported order information and refund eligibility workflows. General-purpose orchestration and parallel execution remain unimplemented; dependent policy checks intentionally execute in order. The complete repository-wide regression suite was not run in this cycle. No AWS resources were involved.
 
+## Local support evidence and concurrent-request isolation — 24 November 2026
+
+The authenticated read-only support workspace now explains refund eligibility from verified balance and eligibility fields, explicitly reports unavailable reasons, and rejects an impossible positive eligibility result with zero refundable balance.
+
+Verification: the prior main baseline passed **438 non-browser regression tests**. The updated isolated Windows checkout passed **75 targeted tests** and the complete non-browser suite (**443 passed in 50.38 seconds**). Five added tests cover evidence-based eligibility explanations, inconsistent results and overlapping independent synthetic customer workflows with separate audit traces, task histories and account data. The concurrent isolation test uses a mocked planner and real policy gateway/SQLite store; it does not demonstrate concurrent model inference or a new parallel scheduler. The model planner and dependent policy operations remain serial. Browser/live-model tests passed in the preceding cycle and were not rerun for this change. No AWS resources were involved.
+
 ## Local development
 
 Python 3.11+ is required. Install the API and optional AWS SDK with `python -m pip install -e ".[server,aws,dev]"`, then start the local API with `shadow-hunter-api`. The API listens on `127.0.0.1:8000` by default and serves the operator console at `/operator`.
