@@ -317,6 +317,12 @@ The authenticated read-only support stream now accepts account-scoped cancellati
 
 Verification: the previous main baseline passed **452 non-browser tests**. The cancellation implementation passed **88 targeted tests**, the separate authenticated HTTP boundary test passed using a controlled synthetic planner, and the updated complete non-browser suite passed **457 tests in 57.40 seconds**. Git diff check passed. The browser and real-model cancellation path have not been rerun on this revision. Parallel inference, a dedicated independent-workflow scheduler, broader support coverage and immediate interruption of blocking calls remain pending. No AWS resources were involved.
 
+## Live cancellation checkpoint verification — 24 November 2026
+
+On the cancellation-enabled main revision, all **9 existing live local HTTP/stream/browser tests passed in 60.62 seconds** using the detected Qwen 3.5 0.8B model and synthetic records. Both workflow benchmarks passed 12/12; the language benchmark's exact intent score remained 11/12.
+
+Added an opt-in live cancellation test that obtains a real model proposal, synchronizes its return, requests authenticated cancellation, and verifies that the subsequent review and business reads do not run. Interrupted task history was verified with zero reads. The expanded browser test also checks model readiness and the cancellation control's label and idle state. Both tests passed in 12.27 seconds; git diff check passed. This tests cooperative cancellation at a checkpoint, not forced interruption of a running inference request or browser-click cancellation under live load. No new execution capabilities, parallel model scheduler or AWS changes were introduced. The 457-test non-browser baseline was not rerun after these test-only additions.
+
 ## Local development
 
 Python 3.11+ is required. Install the API and optional AWS SDK with `python -m pip install -e ".[server,aws,dev]"`, then start the local API with `shadow-hunter-api`. The API listens on `127.0.0.1:8000` by default and serves the operator console at `/operator`.
