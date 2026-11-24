@@ -1,392 +1,205 @@
 # Shadow Hunter
 
-**A policy-enforcement and security operations platform for autonomous AI agents.**
+**Autonomous intelligence. Deterministic security.**
 
-> Let agents reason and propose. Make authorization deterministic, external to the model, and auditable.
+Shadow Hunter is a security and governance control plane for AI agents. It separates model reasoning from authorization, so an agent can interpret a request and propose a workflow without deciding its own permissions.
 
-[Repository](https://github.com/KUNDURUHIMANEESHREDDY/shadow-hunter) · Public repository · Initialized 18 November 2026
+The first implemented workload is customer support and refund management. A local AI workspace, policy-controlled tools, human approval controls and traceable evidence demonstrate how useful agentic workflows can operate within defined boundaries.
 
-## Product outcome
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](pyproject.toml)
+[![Runtime](https://img.shields.io/badge/Local%20runtime-Ollama-black.svg)](src/shadow_hunter/local_runtime.py)
 
-Shadow Hunter controls what an autonomous agent may do when it invokes business tools. The model is not the authority boundary: every consequential tool invocation is checked by deterministic policy enforcement before the downstream operation can run.
+> **Development status:** Local prototype verified with synthetic records and real local model inference. Production release is not approved.
 
-The first supported workload is a customer-support and refund agent. It can look up an order, check refund eligibility, prepare a refund, and request a refund execution. Shadow Hunter must independently enforce customer ownership, eligibility, amount limits, idempotency, and human approval rules.
+## Why Shadow Hunter?
 
-The product is intended to become a reusable control plane for other agent workloads after the first workflow is proven end to end.
+AI agents can misunderstand instructions, propose invalid actions or encounter untrusted content. A model's confidence is not sufficient authorization. Shadow Hunter places deterministic policy enforcement outside the model, checks authenticated identities and resource ownership, and records evidence of each decision.
 
-## What the finished product must look like
+## Capabilities
 
-A deployable web application and AWS-backed agent system with:
+| Component | Implemented capability |
+| --- | --- |
+| Policy engine | Deterministic ALLOW, DENY and ESCALATE decisions; default-deny authorization |
+| Governed MCP tools | Order lookup, refund eligibility and controlled refund-request creation |
+| Local AI workspace | Qwen 3.5 0.8B via Ollama; structured read-only plans, separate plan review and dependency checks |
+| Execution verification | Correlated policy decisions, result validation and one bounded recovery attempt for inconsistent compound reads |
+| Human approval | Expiring, parameter-bound, single-use approval capabilities; operator-only refund execution |
+| Audit and history | Correlated decision records, trace queries and account-scoped local task history |
+| Operator console | Policy evidence, approvals, operational settings and evaluation results |
+| Runtime controls | Model readiness, bounded planning admission, cooperative cancellation and queue timeouts |
 
-1. **Operator console** — registered agents, tool permissions, policy status, recent decisions, pending approvals, and operational health.
-2. **Agent workspace** — a working support/refund conversation that shows the agent planning and invoking tools through the controlled gateway.
-3. **Policy center** — versioned, reviewable policies with ALLOW, DENY, and ESCALATE outcomes, policy simulation, and change history.
-4. **Approval center** — parameter-bound, expiring, single-use approvals for sensitive actions.
-5. **Audit explorer** — end-to-end trace of the user request, proposed action, identity, normalized parameters, policy version, decision, approval, tool result, and timestamps.
-6. **Security evaluation report** — repeatable baseline-versus-protected adversarial suite with attack-success rate, policy-violation rate, false-denial rate, escalation accuracy, and latency.
-7. **Operational package** — infrastructure as code, deployment instructions, health checks, cost limits, incident runbook, and a short public demo video for the hackathon.
+The local model workspace is restricted to order information and refund eligibility. Refund-request creation is available through the separate governed tool interface; actual refund execution is never exposed as a model tool. Demo refund execution updates an internal ledger, not a payment provider.
 
-The final demonstration must show both legitimate work succeeding and malicious or out-of-policy actions being stopped at the tool boundary. It must show evidence, not just a model refusal or a dashboard animation.
-
-## First workload: support and refunds
-
-### Tools
-
-- `get_order(order_id)` — read an order, constrained to the authenticated customer or an explicitly authorized support role.
-- `check_refund_eligibility(order_id)` — determine eligibility using server-side business rules.
-- `create_refund_request(order_id, amount, reason, idempotency_key)` — create a refund request; this is not a direct payment-provider call.
-- Refund execution is not exposed as an agent tool. An authenticated operator can execute a pending refund only after approving the exact request and receiving its one-time capability token.
-- Approval creation is part of the controlled gateway path and binds to the stored action digest, principal, resource, and policy version.
-
-### Example policy outcomes
-
-| Scenario | Required outcome |
-|---|---|
-| Customer reads their own order | ALLOW |
-| Customer reads another customer's order | DENY |
-| Eligible refund within self-service limit | ALLOW or configured ESCALATE |
-| Refund above the configured limit | ESCALATE |
-| Refund execution without valid approval | DENY |
-| Expired, replayed, or parameter-mismatched approval | DENY |
-| Prompt injection asks the agent to ignore policy | Tool call still evaluated; unauthorized action DENIED |
-
-All limits are configuration, not model discretion. The real business rules and amounts must be explicit in versioned policy configuration.
-
-## Architecture direction
-
-The hackathon listing describes a managed Bedrock agent that must stay within developer-defined rules. The current AWS managed-agent direction is **Amazon Bedrock AgentCore Harness + AgentCore Gateway + Policy in ENFORCE mode**. AWS states that Bedrock Agents Classic stopped accepting new customers on 30 July 2026 and recommends AgentCore for equivalent managed-agent functionality. Shadow Hunter uses the managed Harness invocation API and exposes only refund read/request tools through the governed Gateway; refund execution stays in the separate operator approval path.
+## Architecture
 
 ```mermaid
 flowchart TD
-  U["Customer / Operator"] --> UI["React Operator Console"]
-  UI --> API["Authenticated API"]
-  API --> A["Amazon Bedrock AgentCore Harness"]
-  A --> G["AgentCore Gateway + App Policy Gate"]
-  G --> P["Deterministic Policy Enforcement"]
-  P -->|ALLOW| T["Narrow Business Tool"]
-  P -->|DENY| D["Block + Audit"]
-  P -->|ESCALATE| H["Human Approval"]
-  H -->|Approved, still re-authorized| T
-  H -->|Rejected / expired| D
-  T --> DB[("Order and Refund Store")]
-  T --> L["Audit Evidence"]
-  D --> L
-  P --> L
-  L --> S["Audit Explorer / Evidence Export"]
+    U["Authenticated customer"] --> W["Local support workspace"]
+    W --> P["Qwen 3.5 0.8B via Ollama"]
+    P --> R["Structured proposal and review"]
+    R --> C["Server-owned workflow and runtime controls"]
+    C --> G["Governed tool gateway"]
+    M["Authenticated MCP tool client"] --> G
+    G --> D{"Deterministic policy engine"}
+    D -->|Allow| T["Authorized business tools"]
+    D -->|Deny| B["Block request"]
+    D -->|Escalate| A["Approval workflow"]
+    O["Authenticated operator"] --> A
+    A --> E["Re-authorized operator-only ledger execution"]
+    T --> S[("Order and refund store")]
+    E --> S
+    D --> L[("Correlated audit evidence")]
+    B --> L
+    A --> L
+    T --> L
+    E --> L
+    L --> V["Result verification and operator trace view"]
+    V --> W
+    V --> O
 ```
 
-### Proposed implementation stack (subject to compatibility checks)
+The model proposes; the server validates the plan and identity; the gateway authorizes each invocation. Human approval does not replace authorization, and results are checked against the associated policy evidence.
 
-| Layer | Direction |
-|---|---|
-| Agent runtime | Amazon Bedrock AgentCore managed Harness; Classic Agents are no longer open to new customers |
-| Tool gateway / policy | AgentCore Gateway with Cedar Policy in ENFORCE mode, plus deterministic application policy |
-| Business tools | Governed FastAPI tool API in the local slice; deploy behind API Gateway/Lambda for AWS |
-| API | Amazon API Gateway |
-| Identity | Amazon Cognito and least-privilege IAM roles |
-| Operational data | SQLite local/demo plus DynamoDB adapter/template (untested, not deployed) |
-| Audit evidence | Structured append-oriented records with a separately protected retention/export path |
-| Frontend | Minimal operator console served by FastAPI; a richer frontend remains optional |
-| Infrastructure | Not yet deployed; AgentCore configuration examples and Cedar/OpenAPI templates are committed |
-| Tests | Pytest and deterministic policy/adversarial evaluation harness |
+### Technology stack
 
-The hackathon page still states that full details are coming soon. The checked-in integration targets the current AgentCore Harness API and must be reconciled with any additional event rules when AWS publishes them. No AWS resource has been created or deployed.
+| Layer | Technology |
+| --- | --- |
+| Application and policy | Python, FastAPI, Uvicorn |
+| Local intelligence | Ollama, Qwen 3.5 0.8B |
+| Tool protocol | Model Context Protocol (MCP) |
+| Frontend | Browser-based HTML, CSS and JavaScript |
+| Local persistence | SQLite |
+| Optional cloud adapters | DynamoDB, Cognito, Amazon Bedrock AgentCore, Cedar policy templates |
+| Verification | Pytest, Playwright, deterministic synthetic evaluation |
 
-## Security invariants
+## Run locally
 
-These are system requirements, not claims that the current repository already satisfies them.
+Use Python 3.11+, Git and an installed Ollama runtime. The following Windows PowerShell example is for a fresh **localhost-only synthetic demo**, not a production deployment.
 
-- **Default deny:** unknown principal, tool, resource, action, malformed context, unavailable policy service, or policy evaluation error must not authorize a write.
-- **External enforcement:** the model proposes actions; a deterministic component authorizes them.
-- **Tool-boundary coverage:** every registered tool is mediated. No alternate direct credential or endpoint may bypass the gateway.
-- **Downstream checks:** sensitive tools independently validate tenant/customer ownership, resource state, business limits, and idempotency.
-- **Approval binding:** approval binds to principal, action, canonical parameter digest, resource, policy version, expiry, and single-use nonce. Re-authorize immediately before execution.
-- **Least privilege:** agent runtime credentials cannot directly access data stores or invoke privileged business operations outside the controlled tool path.
-- **Untrusted content:** user text, order notes, retrieved documents, tool outputs, and other-agent messages are data, never policy instructions.
-- **Auditability:** decisions and side effects have correlated trace IDs; secrets and sensitive personal data are redacted.
-- **Cost and runtime bounds:** cap model calls, tokens, tool steps, wall-clock time, retries, concurrency, and daily spend. A kill switch must stop new autonomous cycles.
-- **Honest claims:** prompt-injection resistance is measured against a declared test corpus; never claim immunity.
-
-## Security verification — 23 November 2026
-
-- **Local isolated security matrix:** 14 new tests passed across SQLite, Moto DynamoDB/S3, HTTP authentication boundaries, tenant/customer ownership and archive tamper/orphan/duplicate scenarios.
-- **Full regression:** 228 Python tests passed on merged `main` at `fa64c68` (including concurrent Cognito/AgentCore test additions); repository validator and git diff checks passed. The pre-merge security branch had 201 passing tests and compileall success.
-- **Static/dependency checks:** Bandit medium/high scan exit 0; pip-audit on `src/requirements.txt` returned no known vulnerabilities (exit 0).
-- **Live staging unauthenticated checks:** `GET /prod/health` returned 200 with anti-framing/nosniff headers; operator audit/approvals and customer agent tool/chat endpoints returned 401 without bearer tokens.
-- **Live staging AWS audit verification:** After AWS reauthentication, the full audit gate passed: **3 DynamoDB audit records / 3 S3 objects, exact bytes matching, no missing/orphan/duplicate/mismatched records**. S3 Object Lock GOVERNANCE (one-day staging retention), versioning and all public-access blocks were verified.
-- **Live Cognito configuration:** The dedicated MFA API confirms MFA ON with TOTP enabled. Corrected Cognito smoke runner passes live read-only pool/client/delegation inspection. Another merged branch already corrected the `DescribeUserPool.EnabledMfas` false-positive.
-- **Real AWS MFA verified:** The synthetic customer and operator both completed Cognito TOTP enrollment and second SRP sign-in requiring MFA. The issued operator token passed local JWT checks and the staging read-only operator API returned HTTP 200. All temporary users were deleted (Cognito user count 0). Unpadded TOTP Base32 test-runner fix merged to `main`.
-- **Security rerun:** Bounded staging endpoint checks all passed (6/6), audit 3/3 content reconciliation passed again, and the updated isolated local Python suite passed **250 tests**.
-- **Security/recovery E2E gate:** [PR #12](https://github.com/KUNDURUHIMANEESHREDDY/shadow-hunter/pull/12) added signed prompt-injection, SQLite/Moto tenant isolation, agent timeout/partial-stream, interrupted workflow, idempotent retries, token rotation and app-restart HTTP tests. GitHub Actions: **26 focused passed; 320 full Python passed, 1 skipped; Chromium browser E2E passed**. See [full matrix](docs/cycles/2026-11-23-security-recovery-e2e.md).
-- **Still pending:** Scoped OAuth OBO exchange, real authenticated two-tenant staging checks, AgentCore Harness/Gateway execution (health currently reports `agentcore_configured=false`), and a comprehensive scoped live penetration test. Production remains **NO-GO**. See [live MFA rerun evidence](docs/cycles/2026-11-23-staging-mfa-success.md), [audit verification](docs/cycles/2026-11-23-live-aws-security-verification.md), and [earlier test matrix](docs/cycles/2026-11-23-security-validation.md).
-
-## Production readiness — verified 23 November 2026
-
-Three separately committed release-gate improvements are available on `main`:
-
-1. **Managed AgentCore proof**: bounded final assistant stream parsing and
-   `scripts/verify_harness_tool_e2e.py`, which requires both observed Harness
-   tool events and a matching application policy audit trace. The AWS staging
-   account currently has **zero** Harnesses, Gateways, Policy Engines and
-   OAuth credential providers; actual managed tool invocation is **NOT RUN**.
-2. **Real cross-tenant OBO gate**:
-   `scripts/verify_two_tenant_staging.py` checks two independent genuine
-   synthetic delegated tenant tokens, both own-resource reads, cross-tenant
-   denials, missing/foreign nondisclosure and four audit decisions. Genuine
-   delegated two-tenant credentials were not available for a live run.
-3. **Hosted Red/Blue evaluation**:
-   `scripts/benchmark_hosted_red_blue.py` validates a bounded NVIDIA NIM
-   operator run, correlated evaluation audit events and a sanitized policy
-   confusion matrix. No real hosted benchmark was executed during this
-   development cycle; the local workstation did not have its operator JWT or
-   provider keys configured.
-
-**AWS preflight:** the read-only staging preflight confirmed all three
-CloudFormation stacks, Cognito MFA/delegation requirements and AgentCore
-control-plane access. The AWS account has **zero AWS budgets**; a dedicated
-staging cost-alert CloudFormation template is prepared, but **not deployed**.
-Organization policy explicitly denied AWS `cloudformation:ValidateTemplate`
-on the authorized session; no bypass was attempted. Offline CloudFormation
-lint and regression tests passed. Budget alert subscriber email confirmation
-and separate spending controls remain mandatory before billable deployment.
-See the [staging budget release gate](docs/cycles/2026-11-23-staging-budget-control.md).
-
-**Decision: production NO-GO.** Successful local tests and UI E2E do not
-replace the managed Harness/Gateway/Policy deployment, genuine Cognito
-OBO token exchange, live two-tenant security proof, actual hosted evaluation,
-or a scoped independent penetration test. See the
-[production gate record](docs/cycles/2026-11-23-production-gates-progress.md).
-
-## Production acceptance criteria
-
-A release candidate is not accepted until the relevant criteria are demonstrated with reproducible evidence.
-
-| Area | Acceptance condition |
-|---|---|
-| Authorization | 100% of registered tool routes pass through policy enforcement; bypass tests fail closed |
-| Tenant isolation | Cross-customer reads and writes are denied in integration tests |
-| Approval | Expiry, replay, parameter substitution, wrong principal, and stale-policy tests all deny |
-| Reliability | Policy service timeout/error never authorizes a consequential operation |
-| Idempotency | Retries cannot create duplicate refunds |
-| Audit | Every allow, deny, escalation, approval, and executed side effect has a correlated record |
-| Adversarial evaluation | Fixed test set runs baseline and protected modes; raw results and methodology are committed |
-| Security | Dependency, secret, authorization, and skill-supply-chain checks run in CI |
-| Operations | Health/readiness checks, structured logs, alert conditions, backup/retention, rollback, and runbooks documented |
-| Deployment | Fresh deployment can be reproduced from documented infrastructure code |
-| Demo | End-to-end happy path and several attack/boundary cases shown with the trace evidence |
-
-Targets such as latency and evaluation rates will be set after baseline measurement. Do not fabricate benchmark numbers.
-
-## Ten-day engineering schedule
-
-Target window: **18–27 November 2026**. The AWS hackathon page currently lists a close of **2 December 2026, 11:59 PM Pacific Time**; verify the event page again when full rules are published.
-
-| Day | Primary outcome |
-|---|---|
-| 1 — Nov 18 | Repository, architecture decisions, threat model, AWS feasibility and billing gates |
-| 2 — Nov 19 | Domain model, identity assumptions, tool contracts, local test harness |
-| 3 — Nov 20 | Deterministic policy engine and policy decision tests |
-| 4 — Nov 21 | AWS managed-agent runtime and gateway integration proof |
-| 5 — Nov 22 | Working order lookup, eligibility, and refund-request tools |
-| 6 — Nov 23 | Parameter-bound human approval and idempotent execution |
-| 7 — Nov 24 | Correlated audit evidence and trace viewer |
-| 8 — Nov 25 | Adversarial suite, baseline/protected comparison, security fixes |
-| 9 — Nov 26 | Operator console, operational controls, deployment and docs |
-| 10 — Nov 27 | Full regression, load/cost checks, release candidate and demo rehearsal |
-
-Dates are planning targets, not evidence that work is complete. If AWS publishes a blocking requirement, update this plan and record the reason.
-
-## Assistant-led engineering workflow
-
-The owner requested direct code authoring and pushes to `main`; tests and checks are run when explicitly authorized for a work cycle. Shadow Hunter no longer uses a scheduled GitHub Actions workflow, a self-hosted runner, Codex CLI, or an external model API.
-
-Work is performed in an active ChatGPT session using the connected repository environment. The assistant reads current repository context, selects a concrete implementation task, writes code, updates documentation, and reports exact verification evidence and remaining gaps. No background work is claimed after the session ends.
-
-ChatGPT task automations currently support daily, weekly, and monthly recurring schedules, not hourly schedules. They cannot provide 24 separate hourly 30-minute coding sessions or keep this exact model session continuously active in the background. See [engineering workflow](docs/engineering-cycle.md).
-
-## Build status — 20 November 2026
-
-| Component | Current state | Evidence / next action |
-|---|---|---|
-| GitHub repository | PUBLIC; CURRENT MAIN BASELINE `b8968a8` RECONCILED | Remote main advanced during remediation with the Cognito identity foundation and SH-SEC-001/002 follow-ups; this work is rebased onto that head before the final commit. |
-| Local Windows clone | CREATED | `C:\Users\himan\projects\shadow-hunter` |
-| Product specification | DRAFTED | This README; refine against final AWS rules |
-| MIT project license | COMMITTED TO MAIN | Root `LICENSE`; initial repository commit `353e5c8` |
-| Online agent skills | INSTALLED, SCANNED AND REVIEWED | Three license-cleared skills included; Semgrep custom-licensed skill remains local-only; see `docs/skill-review.md` |
-| Codex + Copilot subagents | 14 PROFILES DEFINED; RUNTIME NOT YET VERIFIED | Seven Codex TOML agents and seven Copilot `.agent.md` profiles; frontmatter and tool scopes validate; interactive invocation not yet proven |
-| Application code | POLICY CORE + TOOL GATEWAY + API — 177 PYTHON TESTS PASS | `src/shadow_hunter/`; caller-boundary resource normalization, audited maker-checker, approval-token recovery, generic upstream errors and per-operator evaluation budgets |
-| Policy engine | DETERMINISTIC ALLOW / DENY / ESCALATE | Own-order reads, refund validation, configured threshold and default-deny unknown tools |
-| AWS identity | PRODUCTION COGNITO/OBO CONTRACT IMPLEMENTED - LIVE AWS TOKENS UNVERIFIED | Separate customer/operator/M2M profiles; strict RS256/JWKS, exact delegated audience/scope/actor and trusted claims. Production identity stack and synthetic offline token contracts are present; no AWS account used. |
-| Frontend / trace viewer | OPERATOR CONSOLE — EDGE SECURITY CHECK PASS | `/operator` retains Cognito PKCE login, approvals, metrics, audit and trace views; Edge confirms required anti-framing headers. Full token-recovery reload E2E and deployed API Gateway headers remain pending. |
-| Approval engine | MAKER-CHECKER + AUDITED TOKEN RECOVERY — REGRESSION TESTS PASS | Same-subject approval and execution are denied in SQLite/DynamoDB; operator token rotation invalidates the previous hash and audits recovery without persisting raw tokens. |
-| Refund execution | LOCAL DEMO LEDGER ONLY — UNTESTED | Operator-only execution checks approval, expiry, token, stored digest, order state and remaining balance; retry is idempotent |
-| Audit engine | SQLITE + DYNAMODB AUDIT EVENTS / TRACE QUERY — UNTESTED | Original request/trace IDs persist through approval and execution events; operators can query the event chain. |
-| Red/Blue runtime | ADAPTER CONTRACT TESTS PASS — HOSTED INFERENCE UNVERIFIED | NIM request/output validation and adapter integration are covered by the focused suite (37 passed). The strict Red schema and adaptive timeouts are committed. No provider credentials are configured in the connected local process, so no live NVIDIA request was sent. |
-| A2A message authentication | PER-AGENT HMAC + REPLAY GUARD ADDED — UNTESTED | HMAC-SHA256 signatures, sender/key binding, timestamp window and persistent single-use nonces in SQLite/DynamoDB; current transport remains in-process, not remote/mTLS |
-| Evaluation and operator console | SYNTHETIC CONTRACT RUN PASS; PER-OPERATOR BUDGETS ADDED | Existing synthetic Red/Blue evaluation remains isolated from customer data; hosted runs now have a kill switch, five-run daily per-operator limit and 60-second cooldown. Global spend caps/alerts remain open. |
-| MCP server | CUSTOMER PASS-THROUGH + OBO + HOST ALLOWLIST — UNTESTED | Three tools flow through ToolGateway; strict Cognito customer pass-through or delegated OBO profile, SDK Host allowlist and UUID run correlation; localhost remains default. |
-| AgntID live-agent demo | SEPARATE OLLAMA MCP HARNESS — NOT EXECUTED | `shadow-hunter-agntid-demo` remains an independent AgntID/MCP integration demonstration. It is not called by the hosted NVIDIA NIM Red/Blue evaluation path. |
-| AWS persistence | DYNAMODB ADAPTER + PRODUCTION TEMPLATE VALIDATED/PACKAGED LOCALLY - NOT DEPLOYED | Data template passes SAM lint, cfn-lint and SAM build. DynamoDB adapter runtime and deployed data behavior remain unverified. |
-| Audit archive | OBJECT LOCK EXPORT TEMPLATE VALIDATED/PACKAGED LOCALLY - NOT DEPLOYED | Data stack passes SAM lint, cfn-lint and SAM build. Exporter, DLQ recovery, reconciliation and independent archive verification remain untested against AWS. |
-| Lambda/API deployment | PRODUCTION SAM TEMPLATE VALIDATED/PACKAGED LOCALLY - NOT DEPLOYED | Application stack passes SAM lint, cfn-lint and SAM build. Cognito identity values, API deployment, AgentCore integration and live route authorization remain unverified. |
-| Infrastructure template review | CFN-LINT PASS ON FOUR; SAM VALIDATION PASS / BASIC AS APPLICABLE | Four templates pass cfn-lint. SAM validate --lint passes trigger/data/API; the new identity stack passes basic SAM validation because the bundled linter schema lags a Cognito property. Earlier WSL build/package evidence is recorded in production readiness; current Windows API build attempt remains platform-limited. |
-| Production AWS data plane | PRODUCTION-ONLY IMPLEMENTATION - NOT DEPLOYED; RELEASE NO-GO | Synthetic identity contracts and offline infrastructure checks pass. No AWS account, credentials or live services were used. Security findings and live identity/service verification remain release gates. |
-| Adversarial benchmark | HOSTED BENCHMARK PENDING — 3-CASE CONTRACT SMOKE ONLY | Stubbed three-round run: attack success 0/2, defensive effectiveness 2/2, false denials 0/1, and policy decision accuracy 3/3. These are harness contract results, not hosted-model quality metrics. The eight-scenario hosted evaluation remains pending. |
-| GitHub Actions workflow | REMOVED | No unattended runner workflow remains in the repository |
-| Self-hosted runner | REMOVED FROM DESIGN | No runner is used for assistant-led interactive coding |
-| Assistant-led coding | INTERACTIVE ONLY | Work is performed in the active ChatGPT session; no reusable ChatGPT session endpoint or background execution is available |
-| Security review | PARTIAL — SH-SEC-001–005 FIXED LOCALLY; SH-SEC-006 PARTIAL; SH-SEC-007 STAGING GATE | 177 Python tests pass; Edge framing/header test passes; Semgrep reports zero findings; pip-audit reports no known vulnerabilities. Per-operator inference limits are in place, but global spend caps/alerts remain open. Cognito new-pool controls and offline template/trigger contract tests are committed; actual pool and issued-token evidence remain required. See security review. |
-| Production deployment | NO-GO - SECURITY + LIVE SERVICE VERIFICATION PENDING | Production-only infrastructure is implemented locally. No AWS account or cloud resources were used. Close the security-review findings and obtain separate approval before any deployment. |
-
-Only move a row to COMPLETE after adding a commit, test result, deployed resource identifier, or other inspectable evidence. Update this table after every engineering cycle.
-
-## Repository layout (target)
-
-```text
-.codex/agents/                 Codex project-scoped specialist subagents
-.github/agents/                GitHub Copilot / VS Code specialist agent profiles
-.agents/skills/                Reviewed reusable agent skills
-.github/workflows/             CI and gated hourly engineering workflow
-docs/                          Architecture, threat model, decisions and runbooks
-infra/                         AWS CDK/SAM infrastructure
-src/                           Application and domain code
-tests/                         Unit, integration and adversarial tests
-evals/                         Fixed attack corpus and evaluation reports
-scripts/                       Local verification and bounded cycle runner
-README.md                      Product specification and current build status
-LICENSE                        Project license
-THIRD_PARTY_NOTICES.md         Skill and dependency attribution
+```powershell
+git clone https://github.com/KUNDURUHIMANEESHREDDY/shadow-hunter.git
+cd shadow-hunter
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[server,dev]"
 ```
 
-## Keyless AWS + Cognito sign-in
+Start Ollama locally if it is not already running. Install the required model with:
 
-For local AWS administration, use `python scripts/connect_aws.py` to sign in
-through the native AWS CLI browser flow rather than configuring long-lived
-IAM access keys. `python scripts/connect_aws.py --check --verify-staging`
-checks the current temporary AWS session and staging identity **read only**.
-AWS-hosted services continue to use execution IAM roles.
+```powershell
+ollama pull qwen3.5:0.8b
+```
 
-Customer sign-in is available at `/customer` using a public Cognito
-authorization-code + PKCE app client, scoped OAuth tokens, and a trusted
-backend session check. The operator console already supports Cognito PKCE at
-`/operator`. No browser M2M secrets or manually entered AWS access keys are
-required. Before real staging login, update the customer app client's exact
-HTTPS callback/logout URL to the deployed `/customer` route; the staging
-client still points to an older localhost callback. This implementation
-does not claim live two-tenant OAuth/OBO sign-off or a deployed AgentCore Harness.
+In a fresh PowerShell session, from the repository root, configure isolated local identities and a new demo database:
 
-See [keyless authentication setup and test gates](docs/keyless-auth.md).
+```powershell
+$customer = [guid]::NewGuid().ToString("N")
+$operator = [guid]::NewGuid().ToString("N")
+$customers = @{}
+$customers[$customer] = @{
+    subject_id = "demo-subject"
+    tenant_id = "demo-tenant"
+    customer_id = "demo-customer"
+}
+$operators = @{}
+$operators[$operator] = @{ subject_id = "demo-operator" }
 
-## Local read-only orchestration — 24 November 2026
+$env:SHADOW_HUNTER_CUSTOMER_TOKENS = $customers | ConvertTo-Json -Compress
+$env:SHADOW_HUNTER_OPERATOR_TOKENS = $operators | ConvertTo-Json -Compress
+$env:SHADOW_HUNTER_AUTH_MODE = "local"
+$env:SHADOW_HUNTER_STORE_BACKEND = "sqlite"
+$env:SHADOW_HUNTER_DB_PATH = "demo-$([guid]::NewGuid().ToString('N')).sqlite3"
+$env:SHADOW_HUNTER_LOCAL_READONLY_ENABLED = "true"
+$env:SHADOW_HUNTER_DEMO_MODE = "true"
+$env:SHADOW_HUNTER_EVAL_ENABLED = "false"
 
-The local workspace supports authenticated order details and refund eligibility through the deterministic tool gateway. Compound reads now recover once from inconsistent results, discard stale response data and independently verify the fresh pair under the original trace with distinct request IDs. Denials and missing or mismatched audit evidence never trigger recovery. Task history counts only the active attempt; the audit trail retains both attempts.
+Write-Host "Local customer token: $customer"
+Write-Host "Local operator token: $operator"
+.\.venv\Scripts\shadow-hunter-api.exe
+```
 
-Targeted Python 3.11 verification on the isolated checkout: **49 passed** across local runtime, read-only QA, gateway and policy tests; git diff check passed. The planner still uses a fixed support-intent catalog. General-purpose planning, live-model recovery testing and the full regression suite remain unverified in this cycle. No AWS deployment or new resources were involved.
+Keep the tokens private. In a fresh, non-cloud-configured development environment, the app listens on `127.0.0.1:8000` by default. Never expose the local demo server to the public Internet.
 
-## Structured support planning — 24 November 2026
+Open [the operator console](http://127.0.0.1:8000/operator), authenticate with the generated operator token and seed the synthetic order using the demo seed control or the authenticated `POST /v1/operator/demo/seed` endpoint. Then open [the local workspace](http://127.0.0.1:8000/local-workspace), authenticate with the generated customer token, check model readiness, enter order ID `order-demo-001` and try:
 
-Local Qwen now proposes a bounded list of requested read capabilities and a separate intent review checks agreement. The server compiles the reviewed proposal into a dependency description, checks dependencies before each invocation and retains deterministic policy enforcement. Related reads remain serial so an initial denial prevents further calls. No model-supplied resource identifiers or additional tools are accepted.
+> Show my order details and check refund eligibility.
 
-Verification on an isolated Windows checkout: **63 targeted tests passed**, git diff check passed. A separate real Qwen 3.5 0.8B inference test against temporary synthetic SQLite data passed with one injected read inconsistency, one recovery, four correlated policy audit decisions, two final verified reads and completed task history. The HTTP E2E attempt was blocked at server startup because the isolated Python environment lacked the MCP server extra. Full regression and broader real-model benchmarks remain unverified. This is not arbitrary autonomous workflow generation or parallel execution. No cloud deployment or resources were involved.
+The workspace displays the verified result, live activity and task history. Cancellation requests stop at checkpoints; an in-progress inference call may still need to finish or time out.
 
-## Local support intent boundary and end-to-end verification — 24 November 2026
+### Local interfaces
 
-The local read-only planner stops explicit order cancellation and refund mutation commands instead of silently converting them into read operations. This conservative intent guard is not a replacement for the deterministic authorization gateway.
+| Interface | Path |
+| --- | --- |
+| Local AI support workspace | `/local-workspace` |
+| Operator console | `/operator` |
+| Customer interface (managed-runtime integration) | `/customer` |
+| Health | `/health` |
+| API documentation | `/docs` |
+| MCP server | `/mcp/` |
 
-Verification on a clean isolated Windows checkout: **72 targeted regression tests passed** and git diff check passed. A new Python virtual environment with the declared server/dev extras and Playwright passed pip check. The actual local Qwen model passed **7 HTTP/stream/browser E2E tests** in 42.24 seconds, including the existing language benchmark (12/12 workflow outcomes; 11/12 exact intent outcomes), and the new intent-boundary benchmark (12/12 expected workflow outcomes, up from 11/12 before the guard). The browser test verified task progress, completed history and account isolation on synthetic data.
+## Verification and evidence
 
-The benchmark corpus is limited to the supported order information and refund eligibility workflows. General-purpose orchestration and parallel execution remain unimplemented; dependent policy checks intentionally execute in order. The complete repository-wide regression suite was not run in this cycle. No AWS resources were involved.
+Recorded development results from **24 November 2026**:
 
-## Local support evidence and concurrent-request isolation — 24 November 2026
+| Verification | Recorded result | Tested revision |
+| --- | --- | --- |
+| Full non-browser regression | 457 passed, 1 opt-in test skipped | [6a97a08](https://github.com/KUNDURUHIMANEESHREDDY/shadow-hunter/commit/6a97a085d5ed8dc2b1a3a930759ea30ef8830d3d) |
+| Latest queue-cancellation patch | 91 targeted passed, 1 opt-in test skipped | [30337b9](https://github.com/KUNDURUHIMANEESHREDDY/shadow-hunter/commit/30337b9f079ae6ba2f83bf8b866480d0bfd05d8b) |
+| Live local HTTP, streaming and browser E2E | 9 passed | [457d5a2](https://github.com/KUNDURUHIMANEESHREDDY/shadow-hunter/commit/457d5a21f9bb178d7ca7dc6ee13b69a86b700399) |
+| Live cancellation checkpoint and expanded browser controls | 2 passed | [33b5be6](https://github.com/KUNDURUHIMANEESHREDDY/shadow-hunter/commit/33b5be6e412ed2febc3c2b930081ac21e786ff60) |
+| Language workflow benchmark | 12/12 acceptable outcomes; 11/12 exact intent | 457d5a2 |
+| Support intent-boundary benchmark | 12/12 expected outcomes | 457d5a2 |
+| Local synthetic defensive evaluation | 8/8 expected outcomes, no executed refunds | [Submission evidence](docs/hackathon/README.md) |
 
-The authenticated read-only support workspace now explains refund eligibility from verified balance and eligibility fields, explicitly reports unavailable reasons, and rejects an impossible positive eligibility result with zero refundable balance.
+These results apply to the stated revisions and bounded test corpora. They do not establish universal security, unrestricted task understanding, production readiness or successful hosted sponsor integration.
 
-Verification: the prior main baseline passed **438 non-browser regression tests**. The updated isolated Windows checkout passed **75 targeted tests** and the complete non-browser suite (**443 passed in 50.38 seconds**). Five added tests cover evidence-based eligibility explanations, inconsistent results and overlapping independent synthetic customer workflows with separate audit traces, task histories and account data. The concurrent isolation test uses a mocked planner and real policy gateway/SQLite store; it does not demonstrate concurrent model inference or a new parallel scheduler. The model planner and dependent policy operations remain serial. Browser/live-model tests passed in the preceding cycle and were not rerun for this change. No AWS resources were involved.
+Run the non-browser suite in the isolated development environment:
 
-## Local model readiness and bounded planning — 24 November 2026
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q --ignore=tests/e2e
+```
 
-The authenticated local read-only workspace exposes a model readiness check and distinguishes unavailable Ollama from a missing required model. The probe checks the loopback model-list endpoint only and does not guarantee inference success. Start Ollama locally with `ollama serve` if the service is unavailable; the web application never starts processes or downloads models. The dashboard displays sanitized model-unavailable and planner-busy messages.
+For opt-in live model and browser testing, start Ollama, ensure the required model is installed, install Playwright and have Microsoft Edge available:
 
-Planning admission is bounded per process to one active planner and one waiting request, with a five-second queue wait and the existing 45-second planning budget. Full admission rejects additional requests. Admission and planning locks are released on failure. This is not a FIFO distributed scheduler, parallel inference, or guaranteed cancellation of an in-flight request. The tool allowlist and sequential dependent policy checks are unchanged.
+```powershell
+.\.venv\Scripts\python.exe -m pip install playwright
+$env:RUN_LOCAL_QWEN_E2E = "1"
+.\.venv\Scripts\python.exe -m pytest -q tests/e2e/test_local_runtime_live.py
+.\.venv\Scripts\python.exe -m pytest -q tests/test_local_runtime.py::test_live_model_cancellation_checkpoint
+Remove-Item Env:RUN_LOCAL_QWEN_E2E
+```
 
-Verification on an isolated Windows checkout: **84 targeted runtime/gateway/policy tests passed**; git diff check passed for the implementation commit. The existing local Ollama server was reachable and the required Qwen model detected; no model download or server restart was necessary. **9 live local HTTP/stream/browser tests passed in 56.82 seconds**, including authenticated readiness, language benchmark (12/12 workflow outcomes; 11/12 exact intents) and intent-boundary benchmark (12/12). The full repository-wide suite was not rerun for these changes. Broader authorized support capabilities and guaranteed in-flight cancellation remain pending. No AWS resources were involved.
+## Optional integrations
 
-## Cooperative local support cancellation — 24 November 2026
+The local prototype does not require cloud inference or sponsor accounts.
 
-The authenticated read-only support stream now accepts account-scoped cancellation requests through the local workspace. The server keeps a bounded process-local registry of active support streams (maximum eight). Cancellation is checked before planning, between inference calls, before dependent reads and before completion. A stop request is an acknowledgement, not proof of immediate termination: synchronous inference or an already-started read may need to return or time out before cancellation is observed. Interrupted tasks retain their verified step count and existing audit decisions. Foreign-account and unknown task identifiers return the same unavailable response. Cancellation does not grant additional tool permissions. Browser disconnection alone is not a guarantee of cancellation.
+| Integration | Role | Verification status |
+| --- | --- | --- |
+| BAND | Redacted policy-decision publication | Live collaboration not verified |
+| Lyzr | Advisory inference | Live collaboration not verified |
+| NVIDIA NIM | Optional hosted evaluation | Current hosted benchmark not verified |
+| AWS AgentCore and Cognito | Optional managed deployment and identity | Managed execution and live delegated two-tenant release gates remain open |
 
-Verification: the previous main baseline passed **452 non-browser tests**. The cancellation implementation passed **88 targeted tests**, the separate authenticated HTTP boundary test passed using a controlled synthetic planner, and the updated complete non-browser suite passed **457 tests in 57.40 seconds**. Git diff check passed. The browser and real-model cancellation path have not been rerun on this revision. Parallel inference, a dedicated independent-workflow scheduler, broader support coverage and immediate interruption of blocking calls remain pending. No AWS resources were involved.
+See [sponsor integrations](docs/sponsor-integrations.md), [keyless authentication](docs/keyless-auth.md) and the [hackathon submission kit](docs/hackathon/README.md). External integrations do not expand the model's execution authority.
 
-## Live cancellation checkpoint verification — 24 November 2026
+## Scope and roadmap
 
-On the cancellation-enabled main revision, all **9 existing live local HTTP/stream/browser tests passed in 60.62 seconds** using the detected Qwen 3.5 0.8B model and synthetic records. Both workflow benchmarks passed 12/12; the language benchmark's exact intent score remained 11/12.
+The prototype currently supports one bounded customer-support workload. The model planner is serial, with one active planning session, one waiting request, a five-second queue wait and a 45-second planning budget. Independent customer workflow isolation has been tested using a controlled planner; parallel model inference and a dedicated independent-workflow scheduler are not implemented. Cancellation is cooperative, not guaranteed immediate interruption of active inference.
 
-Added an opt-in live cancellation test that obtains a real model proposal, synchronizes its return, requests authenticated cancellation, and verifies that the subsequent review and business reads do not run. Interrupted task history was verified with zero reads. The expanded browser test also checks model readiness and the cancellation control's label and idle state. Both tests passed in 12.27 seconds; git diff check passed. This tests cooperative cancellation at a checkpoint, not forced interruption of a running inference request or browser-click cancellation under live load. No new execution capabilities, parallel model scheduler or AWS changes were introduced. The 457-test non-browser baseline was not rerun after these test-only additions.
+Further work includes broader approved support coverage, repeatable live-model reliability measurements, latest-patch full regression and browser testing, and independent production verification. No production-ready deployment or verified public demo is claimed.
 
-## Cancellation while waiting for local support planning — 24 November 2026
+## Repository guide
 
-Waiting streamed support requests now check for cancellation during the existing bounded planning wait. A cancelled waiter releases its admission slot without acquiring the active planner or calling the model. The active request remains unaffected. The existing planning timeout and sequential policy checks are unchanged.
+| Path | Purpose |
+| --- | --- |
+| [src/shadow_hunter/](src/shadow_hunter/) | Application, policy, gateway, local runtime and persistence |
+| [tests/](tests/) | Regression and end-to-end verification |
+| [docs/](docs/) | Architecture, security decisions and operational documentation |
+| [infra/](infra/) | Optional cloud infrastructure and deployment configuration |
+| [scripts/](scripts/) | Local verification and demonstration utilities |
 
-Verification: the preceding main revision passed the complete non-browser regression suite (457 passed, one opt-in live-model test skipped). The queue cancellation revision passed 91 targeted runtime/gateway/policy tests, one opt-in test skipped, including two new queue cancellation and timeout tests. Git diff check passed. The complete suite and live browser tests were not rerun for this specific patch. Immediate termination of a blocking inference call, parallel inference and broader workflow scheduling remain unimplemented. No additional execution permissions or AWS changes were introduced.
-
-## Local development
-
-Python 3.11+ is required. Install the API and optional AWS SDK with `python -m pip install -e ".[server,aws,dev]"`, then start the local API with `shadow-hunter-api`. The API listens on `127.0.0.1:8000` by default and serves the operator console at `/operator`.
-
-Local demo mode is the default. Configure `SHADOW_HUNTER_CUSTOMER_TOKENS` and `SHADOW_HUNTER_OPERATOR_TOKENS` as JSON maps of opaque bearer tokens to trusted server-side identity claims. Do not put tokens in source control or request bodies. Opaque tokens are for local development only.
-
-For Cognito mode set `SHADOW_HUNTER_AUTH_MODE=cognito` and the variables documented in `infra/agentcore/README.md`. Customer chat uses a Cognito access token; `/v1/agent/tools/{tool_name}` requires a separate OBO token with the configured target audience, scope and actor claim. The application verifies each token against the user-pool JWKS before creating a Principal. Do not expose the API target until the Cognito pre-token-generation claims, scopes, and AgentCore OBO configuration are deployed and verified.
-
-Set `SHADOW_HUNTER_STORE_BACKEND=sqlite` for local demos. For AWS persistence, set `SHADOW_HUNTER_STORE_BACKEND=dynamodb`, `SHADOW_HUNTER_DYNAMODB_TABLE` to the deployed table name, and `AWS_REGION`. The DynamoDB table template and least-privilege policy example are under `infra/data/`. Set `SHADOW_HUNTER_DB_PATH` only for SQLite mode. `SHADOW_HUNTER_REFUND_LIMIT_MINOR` controls the self-service threshold and `SHADOW_HUNTER_APPROVAL_TTL_SECONDS` controls approval expiry. Set `SHADOW_HUNTER_HARNESS_ARN` and `AWS_REGION` to enable the AgentCore Harness chat route. Set `SHADOW_HUNTER_DEMO_MODE=true` to enable the operator-only demo order seed route. Local refund execution updates a demo ledger only; it does not call a payment provider.
-
-The operator Red/Blue evaluation uses hosted NVIDIA NIM only; it does not load Ollama or any local model. The NIM client uses `https://integrate.api.nvidia.com/v1/chat/completions`. Hosted evaluation can be disabled with `SHADOW_HUNTER_EVAL_ENABLED=false`; default per-operator quota is five runs per UTC day with a 60-second cooldown (`SHADOW_HUNTER_EVAL_RUNS_PER_OPERATOR_DAILY`, `SHADOW_HUNTER_EVAL_COOLDOWN_SECONDS`). These are not a global provider-spend cap. Defaults: Red `nvidia/nemotron-3.5-lightning-30b-a3b`, Blue `nvidia/nemotron-3.5-bolt-e4b`. For local development, direct `NVIDIA_API_KEY` and `SHADOW_HUNTER_A2A_KEYS` remain supported. To manage secrets through the operator UI, configure `SHADOW_HUNTER_NIM_API_KEY_SECRET_ARN` and `SHADOW_HUNTER_A2A_KEYS_SECRET_ARN` with AWS credentials scoped to GetSecretValue/PutSecretValue on those two ARNs. The SAM template creates retained secrets by default when the optional `NvidiaApiKeySecretArn` and `A2AKeysSecretArn` parameters are empty. Open **Settings → Integrations & Secrets** to save the NVIDIA key, test a bounded hosted request, and generate independent Red/Blue keys. For production operator login, set `CognitoHostedUiDomain` and configure the Cognito public app client for authorization-code + PKCE with the `/operator` callback. See [operator integrations](docs/operator-integrations.md) and [agent evaluation](docs/agent-evaluation.md). Evaluations run at most three rounds against synthetic orders and persist redacted results, model IDs and per-round seeds.
-
-The Lambda entrypoint is src/shadow_hunter/lambda_handler.py; the SAM package is under infra/app/ and uses src/requirements.txt. The deployment template routes customer, delegated tool and operator endpoints through distinct API Gateway JWT authorizers, with FastAPI performing a second token-profile check. The public template intentionally omits the localhost-only MCP route. The isolated Python 3.11 environment with project extras passes the full merged-main suite: **177 passed**. cfn-lint passes all four production templates; SAM validate --lint passes the existing-pool trigger, data and API templates, and basic SAM validation passes the new Cognito identity stack. No AWS resources have been created or deployed.
-
-## Cost and automation policy
-
-GitHub Actions compute, AI model usage, AWS service usage, and local machine runtime are separate cost surfaces. The project must not assume that a free GitHub Actions allowance includes model inference.
-
-- Repository visibility is public by owner authorization; committed source and Git history are public.
-- Use GitHub-hosted Ubuntu runners; the user's local machine is not required.
-- GitHub's current billing documentation states that self-hosted runner usage and standard runners on public repositories are free for Actions compute; private GitHub-hosted runner use draws from included quota and may be billed after it is exhausted.
-- Model usage is billed/limited separately by the model provider or Copilot/ChatGPT plan.
-- Keep the scheduled workflow gated by `SHADOW_HUNTER_AUTOMATION_ENABLED`; the default is disabled.
-- The workflow is scheduled hourly, with one bounded 30-minute cycle per run. This is not one continuously running 24-hour process.
-- For a private repository using standard GitHub-hosted Linux 2-core runners, GitHub Free currently includes 2,000 minutes/month; 5,200 additional minutes at the documented $0.006/minute baseline would be about $31.20 if the full 7,200 minutes are consumed and the entire included quota is available. Actual cost depends on runner type, existing account usage, and current rates.
-- GitHub-hosted standard runners for public repositories are generally free for Actions compute under GitHub's current policy; model API usage is billed separately. Reconfirm policy before installation.
-- OpenAI API model inference is separate from Actions compute and ChatGPT subscription usage. An API key with billing/usage access is required; see `docs/cloud-model.md`.
-- Require explicit per-cycle limits and a global kill switch; do not let the agent modify its own spending limits or secrets.
-- Inspect Actions billing and model quota before enabling unattended execution.
-
-## Third-party agent skills
-
-Downloaded skills are untrusted supply-chain inputs. Each skill must be previewed, scanned, manually reviewed, pinned to an immutable commit/tag, and accompanied by its original license before it is committed. Semgrep's `llm-security` skill is installed locally for reference but is excluded from version control until its custom license terms are reviewed. See `THIRD_PARTY_NOTICES.md`.
-
-## Contributing and change control
-
-- Work directly on `main` as requested, using small verified commits.
-- Do not weaken tests to make a build pass.
-- Do not deploy, create paid resources, or change account billing limits without reviewing the impact.
-- Never commit credentials, access tokens, personal customer records, or local authentication files.
-- Record architectural decisions under `docs/decisions/`.
-- Every completed feature must include tests and an evidence-backed README status update.
+For detailed historical milestones and release gates, see the [previous README snapshot](https://github.com/KUNDURUHIMANEESHREDDY/shadow-hunter/blob/1969e7ed5e26493ae9aead45ec11dcda5983ffb9/README.md) and [architecture documentation](docs/architecture.md).
 
 ## License
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE).
-
-
-## Diwali Festiverse sponsor adapters (opt-in)
-
-The separate Diwali Festiverse hackathon evaluates sponsor integration.
-Shadow Hunter includes operator-authenticated **Lyzr advisory inference**,
-**BAND redacted policy-decision publication**, a **Finch-ready reviewed
-audit skill package**, and an **AdaL demo-production brief**. They do not
-grant external agents tool execution authority. Provider connectivity,
-Finch publication and exported video are **not yet live-verified**.
-For synthetic BAND-to-Lyzr advisory collaboration, run `python -m shadow_hunter.band_worker --once` after configuring both accounts. See [Sponsor setup and verification](docs/sponsor-integrations.md).
-
-## Hackathon submission kit — 24 November 2026
-
-See [submission kit](docs/hackathon/README.md) for the current reproducible local demonstration, bounded evidence, architecture and Devpost draft. The older planning/status tables above are historical snapshots, not current production or sponsor sign-off. Live BAND/Lyzr credentials and a public demo release remain outstanding.
+Released under the [MIT License](LICENSE). See [third-party notices](THIRD_PARTY_NOTICES.md) for applicable attribution.
