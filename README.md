@@ -311,6 +311,12 @@ Planning admission is bounded per process to one active planner and one waiting 
 
 Verification on an isolated Windows checkout: **84 targeted runtime/gateway/policy tests passed**; git diff check passed for the implementation commit. The existing local Ollama server was reachable and the required Qwen model detected; no model download or server restart was necessary. **9 live local HTTP/stream/browser tests passed in 56.82 seconds**, including authenticated readiness, language benchmark (12/12 workflow outcomes; 11/12 exact intents) and intent-boundary benchmark (12/12). The full repository-wide suite was not rerun for these changes. Broader authorized support capabilities and guaranteed in-flight cancellation remain pending. No AWS resources were involved.
 
+## Cooperative local support cancellation — 24 November 2026
+
+The authenticated read-only support stream now accepts account-scoped cancellation requests through the local workspace. The server keeps a bounded process-local registry of active support streams (maximum eight). Cancellation is checked before planning, between inference calls, before dependent reads and before completion. A stop request is an acknowledgement, not proof of immediate termination: synchronous inference or an already-started read may need to return or time out before cancellation is observed. Interrupted tasks retain their verified step count and existing audit decisions. Foreign-account and unknown task identifiers return the same unavailable response. Cancellation does not grant additional tool permissions. Browser disconnection alone is not a guarantee of cancellation.
+
+Verification: the previous main baseline passed **452 non-browser tests**. The cancellation implementation passed **88 targeted tests**, the separate authenticated HTTP boundary test passed using a controlled synthetic planner, and the updated complete non-browser suite passed **457 tests in 57.40 seconds**. Git diff check passed. The browser and real-model cancellation path have not been rerun on this revision. Parallel inference, a dedicated independent-workflow scheduler, broader support coverage and immediate interruption of blocking calls remain pending. No AWS resources were involved.
+
 ## Local development
 
 Python 3.11+ is required. Install the API and optional AWS SDK with `python -m pip install -e ".[server,aws,dev]"`, then start the local API with `shadow-hunter-api`. The API listens on `127.0.0.1:8000` by default and serves the operator console at `/operator`.
