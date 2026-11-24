@@ -195,3 +195,71 @@ def test_verified_answer_uses_gateway_data(monkeypatch,runtime):
     result=rt.run_readonly_task(gateway,principal,prompt="view and check",order_id="sample-order")
     assert "1000 minor units (USD)" in result["answer"]
     assert "eligible" in result["answer"]
+
+
+def test_inconsistent_compound_read_recovers_once(monkeypatch, runtime):
+    gateway, principal = runtime
+    monkeypatch.setattr(rt, "plan_readonly_task", lambda prompt: "both")
+    invoke = gateway.invoke
+    calls = []
+
+    def changed(**kwargs):
+        result = invoke(**kwargs)
+        calls.append(kwargs)
+        if len(calls) == 2:
+            result["eligibility"]["refundable_minor"] = 999
+        return result
+
+    monkeypatch.setattr(gateway, "invoke", changed)
+    events = list(rt.iter_readonly_task(gateway, principal,
+                                       prompt="view and check", order_id="sample-order"))
+    result = events[-1]["result"]
+    assert result["status"] == "completed"
+    assert result["verified_steps"] == 2
+    assert result["steps"][1]["result"]["eligibility"]["refundable_minor"] == 1000
+    assert len(calls) == 4
+    assert len({c["request_id"] for c in calls}) == 4
+    assert {c["trace_id"] for c in calls} == {result["trace_id"]}
+    assert all(c["arguments"] == {"order_id": "sample-order"} for c in calls)
+    assert sum(e.get("stage") == "recovery" for e in events) == 1
+    audit = [e for e in gateway.store.get_trace_events(result["trace_id"])
+             if e["event_type"] == "POLICY_DECISION"]
+    assert len(audit) == 4
+
+
+def test_persistent_inconsistency_fails_after_one_recovery(monkeypatch, runtime):
+    gateway, principal = runtime
+    monkeypatch.setattr(rt, "plan_readonly_task", lambda prompt: "both")
+    invoke = gateway.invoke
+    calls = []
+
+    def changed(**kwargs):
+        result = invoke(**kwargs)
+        calls.append(kwargs)
+        if kwargs["tool_name"] == "check_refund_eligibility":
+            result["eligibility"]["refundable_minor"] = 999
+        return result
+
+    monkeypatch.setattr(gateway, "invoke", changed)
+    with pytest.raises(rt.LocalRuntimeError, match="bounded recovery"):
+        list(rt.tracked_readonly_task(gateway, principal,
+                                      prompt="view and check", order_id="sample-order"))
+    assert len(calls) == 4
+    assert gateway.store.list_local_tasks(principal)[0]["status"] == "failed"
+
+
+def test_denial_and_evidence_failure_never_retry(monkeypatch, runtime):
+    gateway, principal = runtime
+    monkeypatch.setattr(rt, "plan_readonly_task", lambda prompt: "both")
+    invoke = Mock(wraps=gateway.invoke)
+    monkeypatch.setattr(gateway, "invoke", invoke)
+    result = rt.run_readonly_task(gateway, principal,
+                                  prompt="view and check", order_id="missing-order")
+    assert result["status"] == "denied"
+    assert invoke.call_count == 1
+    invoke.reset_mock()
+    monkeypatch.setattr(gateway.store, "get_trace_events", lambda trace: [])
+    with pytest.raises(rt.LocalRuntimeError, match="evidence"):
+        rt.run_readonly_task(gateway, principal,
+                             prompt="view and check", order_id="sample-order")
+    assert invoke.call_count == 1

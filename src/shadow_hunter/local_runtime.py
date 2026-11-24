@@ -206,30 +206,40 @@ def iter_readonly_task(gateway: ToolGateway, principal: Principal, *,
         timeline.append({"stage": "planning", "status": intent})
         yield {"type": "result", "result": response(intent)}
         return
-    for tool in plan:
-        request_id = str(uuid4())
-        yield {"type": "progress", "stage": "tool", "status": "started", "tool": tool, "trace_id": trace}
-        result = gateway.invoke(
-            principal=principal, tool_name=tool, arguments={"order_id": order_id},
-            request_id=request_id, trace_id=trace, agent_id=AGENT_ID,
-        )
-        _verify_step(gateway, principal, trace=trace, request_id=request_id,
-                     tool=tool, order_id=order_id, result=result)
-        steps.append({"tool": tool, "result": public_tool_result(result), "verified": True})
-        timeline.append({"stage": "tool", "tool": tool, "status": "verified"})
-        yield {"type": "progress", "stage": "tool", "status": "verified", "tool": tool, "trace_id": trace}
-        if result["decision"] != "ALLOW":
-            timeline.append({"stage": "completion", "status": "denied"})
-            yield {"type": "result", "result": response("denied")}
-            return
-    # Both reads should agree before marking a compound task complete.
-    if len(steps) == 2:
+    # At most one fresh read of the whole compound plan. Never retry a denial
+    # or failed audit verification; those must stop execution immediately.
+    for attempt in range(2):
+        for tool in plan:
+            request_id = str(uuid4())
+            yield {"type": "progress", "stage": "tool", "status": "started", "tool": tool, "trace_id": trace}
+            result = gateway.invoke(
+                principal=principal, tool_name=tool, arguments={"order_id": order_id},
+                request_id=request_id, trace_id=trace, agent_id=AGENT_ID,
+            )
+            _verify_step(gateway, principal, trace=trace, request_id=request_id,
+                         tool=tool, order_id=order_id, result=result)
+            steps.append({"tool": tool, "result": public_tool_result(result), "verified": True})
+            timeline.append({"stage": "tool", "tool": tool, "status": "verified"})
+            yield {"type": "progress", "stage": "tool", "status": "verified", "tool": tool, "trace_id": trace}
+            if result["decision"] != "ALLOW":
+                timeline.append({"stage": "completion", "status": "denied"})
+                yield {"type": "result", "result": response("denied")}
+                return
+        if len(steps) != 2:
+            break
         order = steps[0]["result"]["order"]
         eligibility = steps[1]["result"]["eligibility"]
-        if (order["currency"] != eligibility["currency"]
-                or order["refundable_minor"] != eligibility["refundable_minor"]
-                or eligibility["eligible"] != (order["refund_eligible"] and order["refundable_minor"] > 0)):
-            raise LocalRuntimeError("Read results changed; retry the task")
+        if (order["currency"] == eligibility["currency"]
+                and order["refundable_minor"] == eligibility["refundable_minor"]
+                and eligibility["eligible"] == (order["refund_eligible"] and order["refundable_minor"] > 0)):
+            break
+        if attempt == 1:
+            raise LocalRuntimeError("Read results changed after bounded recovery")
+        # Discard inconsistent data before collecting a fresh pair. Previous
+        # decision evidence remains in the audit store under the same trace.
+        steps.clear()
+        timeline.append({"stage": "recovery", "status": "retrying"})
+        yield {"type": "progress", "stage": "recovery", "status": "retrying", "trace_id": trace}
     timeline.append({"stage": "completion", "status": "verified"})
     yield {"type": "result", "result": response("completed")}
 
