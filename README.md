@@ -346,3 +346,7 @@ audit skill package**, and an **AdaL demo-production brief**. They do not
 grant external agents tool execution authority. Provider connectivity,
 Finch publication and exported video are **not yet live-verified**.
 For synthetic BAND-to-Lyzr advisory collaboration, run `python -m shadow_hunter.band_worker --once` after configuring both accounts. See [Sponsor setup and verification](docs/sponsor-integrations.md).
+
+## Hackathon submission kit — 24 November 2026
+
+See [submission kit](docs/hackathon/README.md) for the current reproducible local demonstration, bounded evidence, architecture and Devpost draft. The older planning/status tables above are historical snapshots, not current production or sponsor sign-off. Live BAND/Lyzr credentials and a public demo release remain outstanding.
