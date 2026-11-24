@@ -289,6 +289,14 @@ Local Qwen now proposes a bounded list of requested read capabilities and a sepa
 
 Verification on an isolated Windows checkout: **63 targeted tests passed**, git diff check passed. A separate real Qwen 3.5 0.8B inference test against temporary synthetic SQLite data passed with one injected read inconsistency, one recovery, four correlated policy audit decisions, two final verified reads and completed task history. The HTTP E2E attempt was blocked at server startup because the isolated Python environment lacked the MCP server extra. Full regression and broader real-model benchmarks remain unverified. This is not arbitrary autonomous workflow generation or parallel execution. No cloud deployment or resources were involved.
 
+## Local support intent boundary and end-to-end verification — 24 November 2026
+
+The local read-only planner stops explicit order cancellation and refund mutation commands instead of silently converting them into read operations. This conservative intent guard is not a replacement for the deterministic authorization gateway.
+
+Verification on a clean isolated Windows checkout: **72 targeted regression tests passed** and git diff check passed. A new Python virtual environment with the declared server/dev extras and Playwright passed pip check. The actual local Qwen model passed **7 HTTP/stream/browser E2E tests** in 42.24 seconds, including the existing language benchmark (12/12 workflow outcomes; 11/12 exact intent outcomes), and the new intent-boundary benchmark (12/12 expected workflow outcomes, up from 11/12 before the guard). The browser test verified task progress, completed history and account isolation on synthetic data.
+
+The benchmark corpus is limited to the supported order information and refund eligibility workflows. General-purpose orchestration and parallel execution remain unimplemented; dependent policy checks intentionally execute in order. The complete repository-wide regression suite was not run in this cycle. No AWS resources were involved.
+
 ## Local development
 
 Python 3.11+ is required. Install the API and optional AWS SDK with `python -m pip install -e ".[server,aws,dev]"`, then start the local API with `shadow-hunter-api`. The API listens on `127.0.0.1:8000` by default and serves the operator console at `/operator`.
