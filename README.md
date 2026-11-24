@@ -130,6 +130,7 @@ The workspace displays the verified result, live activity and task history. Canc
 
 | Interface | Path |
 | --- | --- |
+| Durable approved job queue | `/v1/agent/local-jobs` |
 | Local AI support workspace | `/local-workspace` |
 | Operator console | `/operator` |
 | Customer interface (managed-runtime integration) | `/customer` |
@@ -184,9 +185,9 @@ See [sponsor integrations](docs/sponsor-integrations.md), [keyless authenticatio
 
 ## Scope and roadmap
 
-The prototype currently supports one bounded customer-support workload. The local planner admits two concurrent planning sessions and two waiting requests, with a five-second queue wait and a 45-second planning budget. Eight workflow lifetimes may be admitted at once. The dependency ledger validates the entire allowlisted graph and exposes ready nodes; the support workload retains serial dependent reads and gateway verification. Streamed inference cancellation closes its HTTP request without terminating the shared Ollama process. Two concurrent live requests returned correct plans in 6.156 seconds; this does not prove parallel compute inside Ollama. A dedicated persistent scheduler and broader approved capability adapters are still pending.
+The prototype currently supports one bounded customer-support workload. The local planner admits two concurrent planning sessions and two waiting requests, with a five-second queue wait and a 45-second planning budget. Eight interactive workflow lifetimes may be admitted at once. A separate durable SQLite job queue accepts explicitly selected read capabilities and supports up to four independent dispatched jobs. The dependency ledger validates the entire allowlisted graph and exposes ready nodes; the support workload retains serial dependent reads and gateway verification. Streamed inference cancellation closes its HTTP request without terminating the shared Ollama process. Two concurrent live requests returned correct plans in 6.156 seconds; this does not prove parallel compute inside Ollama. The durable queue stores job identity, owner, registered capability, order identifier, state, lease and trace metadata only. Authenticated dispatch claims queued jobs transactionally, and expired leases are marked interrupted rather than silently replayed. The workspace supports queue, cancel queued jobs and dispatch a batch of up to four. Broader domain adapters and automatic dispatch without a fresh authenticated request are not implemented.
 
-Further work includes broader approved support coverage, a durable scheduler, verified Ollama compute cancellation and parallelism, repeatable live-model reliability measurements, latest-patch full regression and browser testing, and independent production verification. No production-ready deployment or verified public demo is claimed.
+Further work includes broader approved support coverage, additional capability adapters, verified Ollama compute cancellation and parallelism, repeatable live-model reliability measurements, latest-patch full regression and browser testing, and independent production verification. No production-ready deployment or verified public demo is claimed.
 
 ## Repository guide
 

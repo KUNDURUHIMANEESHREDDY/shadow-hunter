@@ -483,6 +483,54 @@ def create_app(
             raise HTTPException(status_code=422, detail="Invalid local task")
         return principal, prompt, order_id
 
+    def local_scheduler(authorization):
+        principal = gateway_tool_principal(authorization)
+        require_local_runtime()
+        from .scheduler import DurableScheduler
+        return principal, DurableScheduler(store)
+
+    @app.get("/v1/agent/local-jobs")
+    def list_local_jobs(authorization: str | None = Header(default=None)):
+        principal, scheduler = local_scheduler(authorization)
+        from .scheduler import CAPABILITIES
+        return {"capabilities": list(CAPABILITIES), "jobs": scheduler.list(principal)}
+
+    @app.post("/v1/agent/local-jobs")
+    def enqueue_local_job(body: dict[str, Any] = Body(...),
+                          authorization: str | None = Header(default=None)):
+        principal, scheduler = local_scheduler(authorization)
+        from .scheduler import QueueBusy
+        if set(body) != {"capability", "order_id"}:
+            raise HTTPException(status_code=422,detail="Invalid job")
+        try:
+            return {"job_id": scheduler.enqueue(principal,body["capability"],body["order_id"]),
+                    "status":"queued"}
+        except ValueError:
+            raise HTTPException(status_code=422,detail="Invalid job") from None
+        except QueueBusy:
+            raise HTTPException(status_code=429,detail="Job queue busy") from None
+
+    @app.post("/v1/agent/local-jobs/run-next")
+    def run_next_local_job(authorization: str | None = Header(default=None)):
+        principal, scheduler = local_scheduler(authorization)
+        from .scheduler import QueueBusy
+        try:
+            return scheduler.dispatch_next(principal,gateway) or {"status":"empty"}
+        except QueueBusy:
+            raise HTTPException(status_code=429,detail="Job queue busy") from None
+
+    @app.post("/v1/agent/local-jobs/run-batch")
+    def run_batch_local_jobs(authorization: str | None = Header(default=None)):
+        principal, scheduler = local_scheduler(authorization)
+        return {"jobs": scheduler.dispatch_batch(principal,gateway)}
+
+    @app.post("/v1/agent/local-jobs/{job_id}/cancel")
+    def cancel_queued_local_job(job_id: str, authorization: str | None = Header(default=None)):
+        principal, scheduler = local_scheduler(authorization)
+        if not scheduler.cancel(principal,job_id):
+            raise HTTPException(status_code=404,detail="Queued job not available")
+        return {"status":"cancelled"}
+
     @app.get("/local-workspace")
     def local_workspace():
         require_local_runtime()

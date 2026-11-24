@@ -203,3 +203,29 @@ def test_model_readiness_live(local_runtime_enabled, local_server):
     with urllib.request.urlopen(req, timeout=5) as response:
         assert response.headers.get("Cache-Control") == "no-store"
         assert json.load(response) == {"model": "qwen3.5:0.8b", "status": "ready", "ready": True}
+
+
+def test_durable_queue_browser(local_runtime_enabled,local_server):
+    from playwright.sync_api import sync_playwright, expect
+    with sync_playwright() as p:
+        browser=p.chromium.launch(channel="msedge",headless=True)
+        try:
+            page=browser.new_page()
+            page.goto(local_server+"/local-workspace")
+            page.locator("#token").fill(CUSTOMER_TOKEN)
+            page.locator("#connect").click()
+            expect(page.locator("#status")).to_have_text("Connected to local account.")
+            page.locator("#order").fill(OWN_ORDER)
+            page.locator("#job-add").click()
+            expect(page.locator("#jobs-list")).to_contain_text("queued")
+            page.locator("#job-capability").select_option("refund_status")
+            page.locator("#job-add").click()
+            expect(page.locator("#jobs-list tr")).to_have_count(2)
+            page.locator("#jobs-run").click()
+            expect(page.locator("#jobs-list tr").filter(has_text="completed")).to_have_count(2)
+            expect(page.locator("#jobs-result")).to_contain_text("verified_steps")
+            page.locator("#disconnect").click()
+            expect(page.locator("#jobs-list tr")).to_have_count(0)
+            expect(page.locator("#jobs-result")).to_be_empty()
+        finally:
+            browser.close()

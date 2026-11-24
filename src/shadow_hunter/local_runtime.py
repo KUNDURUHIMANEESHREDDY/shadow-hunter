@@ -384,7 +384,8 @@ def _verify_step(gateway: ToolGateway, principal: Principal, *, trace: str,
 
 def _iter_readonly_task(gateway: ToolGateway, principal: Principal, *,
                        prompt: str, order_id: str,
-                       cancellation: threading.Event | None = None) -> Iterator[dict[str, Any]]:
+                       cancellation: threading.Event | None = None,
+                       approved_intent: str | None = None) -> Iterator[dict[str, Any]]:
     if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 1000:
         raise ValueError("Prompt must contain 1-1000 characters")
     if not isinstance(order_id, str) or not order_id.strip() or len(order_id) > 128 or order_id.strip() != order_id:
@@ -394,8 +395,9 @@ def _iter_readonly_task(gateway: ToolGateway, principal: Principal, *,
     trace = str(uuid4())
     yield {"type": "progress", "stage": "planning", "status": "started", "trace_id": trace}
     _checkpoint(cancellation)
-    intent = (plan_readonly_task(prompt) if cancellation is None
-              else plan_readonly_task(prompt, cancellation=cancellation))
+    intent = (approved_intent if approved_intent is not None else
+              plan_readonly_task(prompt) if cancellation is None else
+              plan_readonly_task(prompt, cancellation=cancellation))
     _checkpoint(cancellation)
     if not isinstance(intent, str) or (intent not in PLANS and intent != "clarify"):
         raise LocalRuntimeError("Invalid plan")
