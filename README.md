@@ -323,6 +323,12 @@ On the cancellation-enabled main revision, all **9 existing live local HTTP/stre
 
 Added an opt-in live cancellation test that obtains a real model proposal, synchronizes its return, requests authenticated cancellation, and verifies that the subsequent review and business reads do not run. Interrupted task history was verified with zero reads. The expanded browser test also checks model readiness and the cancellation control's label and idle state. Both tests passed in 12.27 seconds; git diff check passed. This tests cooperative cancellation at a checkpoint, not forced interruption of a running inference request or browser-click cancellation under live load. No new execution capabilities, parallel model scheduler or AWS changes were introduced. The 457-test non-browser baseline was not rerun after these test-only additions.
 
+## Cancellation while waiting for local support planning — 24 November 2026
+
+Waiting streamed support requests now check for cancellation during the existing bounded planning wait. A cancelled waiter releases its admission slot without acquiring the active planner or calling the model. The active request remains unaffected. The existing planning timeout and sequential policy checks are unchanged.
+
+Verification: the preceding main revision passed the complete non-browser regression suite (457 passed, one opt-in live-model test skipped). The queue cancellation revision passed 91 targeted runtime/gateway/policy tests, one opt-in test skipped, including two new queue cancellation and timeout tests. Git diff check passed. The complete suite and live browser tests were not rerun for this specific patch. Immediate termination of a blocking inference call, parallel inference and broader workflow scheduling remain unimplemented. No additional execution permissions or AWS changes were introduced.
+
 ## Local development
 
 Python 3.11+ is required. Install the API and optional AWS SDK with `python -m pip install -e ".[server,aws,dev]"`, then start the local API with `shadow-hunter-api`. The API listens on `127.0.0.1:8000` by default and serves the operator console at `/operator`.
