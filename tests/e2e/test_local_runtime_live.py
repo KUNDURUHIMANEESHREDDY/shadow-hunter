@@ -347,3 +347,28 @@ def test_independent_verification_browser(page,local_runtime_enabled,local_serve
     result=json.loads(page.locator("#workflow-result").inner_text())
     assert result["status"]=="completed"
     assert all(n["verification"]["status"]=="verified" for n in result["nodes"].values())
+
+
+def test_saved_workflow_resume_browser(page,local_runtime_enabled,local_server):
+    from playwright.sync_api import expect
+    page.goto(local_server+"/local-workspace")
+    page.locator("#token").fill(CUSTOMER_TOKEN)
+    page.locator("#connect").click()
+    expect(page.locator("#status")).to_have_text("Connected to local account.")
+    page.locator("#workflow-example").click()
+    page.locator("#checkpoint-save").click()
+    expect(page.locator("#checkpoint-status")).to_have_text("1 saved workflows.")
+    page.locator("#checkpoint-list").get_by_text("Advance next step").click()
+    expect(page.locator("#checkpoint-list")).to_contain_text("independent_rational_recalculation")
+    page.locator("#disconnect").click()
+    expect(page.locator("#checkpoint-list")).to_be_empty()
+    page.locator("#token").fill(CUSTOMER_TOKEN)
+    page.locator("#connect").click()
+    expect(page.locator("#status")).to_have_text("Connected to local account.")
+    page.locator("#checkpoint-refresh").click()
+    expect(page.locator("#checkpoint-list")).to_contain_text("independent_rational_recalculation")
+    page.locator("#checkpoint-list").get_by_text("Advance next step").click()
+    expect(page.locator("#checkpoint-list")).to_contain_text('"value": "2000"')
+    expect(page.locator("#checkpoint-list").get_by_text("Advance next step")).to_be_disabled()
+    page.locator("#checkpoint-list").get_by_text("Delete saved workflow").click()
+    expect(page.locator("#checkpoint-status")).to_have_text("0 saved workflows.")

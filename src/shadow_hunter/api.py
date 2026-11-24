@@ -612,6 +612,58 @@ def create_app(
         except LocalRuntimeError as exc:
             raise HTTPException(status_code=503,detail=public_runtime_error(exc)) from None
 
+    def durable_workflow_context(authorization):
+        principal = gateway_tool_principal(authorization)
+        require_local_runtime()
+        from .durable_workflows import WorkflowStore
+        return principal, WorkflowStore(store)
+
+    @app.get("/v1/agent/local-checkpoints")
+    def list_checkpoints(authorization: str | None = Header(default=None)):
+        principal, workflows = durable_workflow_context(authorization)
+        return {"workflows":workflows.list(principal)}
+
+    @app.post("/v1/agent/local-checkpoints")
+    def create_checkpoint(body: dict[str, Any] = Body(...), authorization: str | None = Header(default=None)):
+        principal, workflows = durable_workflow_context(authorization)
+        from .durable_workflows import WorkflowBusy
+        if set(body)!={"nodes"}:
+            raise HTTPException(status_code=422,detail="Invalid checkpoint graph")
+        try:
+            return {"id":workflows.create(principal,body["nodes"]),"status":"paused"}
+        except ValueError:
+            raise HTTPException(status_code=422,detail="Invalid or unsupported persistent graph") from None
+        except WorkflowBusy:
+            raise HTTPException(status_code=429,detail="Checkpoint capacity reached") from None
+
+    @app.post("/v1/agent/local-checkpoints/{workflow_id}/advance")
+    def advance_checkpoint(workflow_id: str, authorization: str | None = Header(default=None)):
+        principal, workflows = durable_workflow_context(authorization)
+        from .durable_workflows import WorkflowBusy, WorkflowNotFound
+        from .local_runtime import _WORKFLOW_SLOTS
+        if not _WORKFLOW_SLOTS.acquire(blocking=False):
+            raise HTTPException(status_code=429,detail="Workflow capacity reached")
+        try:
+            return workflows.advance(principal,gateway,workflow_id)
+        except WorkflowNotFound:
+            raise HTTPException(status_code=404,detail="Workflow not found") from None
+        except WorkflowBusy:
+            raise HTTPException(status_code=409,detail="Workflow busy or checkpoint uncertain") from None
+        finally:
+            _WORKFLOW_SLOTS.release()
+
+    @app.delete("/v1/agent/local-checkpoints/{workflow_id}")
+    def delete_checkpoint(workflow_id: str, authorization: str | None = Header(default=None)):
+        principal, workflows = durable_workflow_context(authorization)
+        from .durable_workflows import WorkflowBusy, WorkflowNotFound
+        try:
+            workflows.delete(principal,workflow_id)
+            return {"status":"deleted"}
+        except WorkflowNotFound:
+            raise HTTPException(status_code=404,detail="Workflow not found") from None
+        except WorkflowBusy:
+            raise HTTPException(status_code=409,detail="Workflow running") from None
+
     @app.post("/v1/agent/local-workflows")
     def run_local_workflow(body: dict[str, Any] = Body(...),
                            authorization: str | None = Header(default=None)):
