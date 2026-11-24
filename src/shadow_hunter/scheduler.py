@@ -9,22 +9,14 @@ from __future__ import annotations
 import time
 import re
 from decimal import Decimal
-from types import MappingProxyType
 from uuid import uuid4
 
 from . import local_runtime as rt
 from .policy import Principal
 from .store import SQLiteStore
 
-CAPABILITIES = MappingProxyType({
-    "order_summary": "order_details",
-    "refund_status": "refund_eligibility",
-    "order_and_refund_review": "both",
-    "model_readiness": None,
-    "numeric_summary": None,
-    "public_repo_metadata": None,
-    "unit_conversion": None,
-})
+from .capability_catalog import CAPABILITIES, require_enabled
+
 TERMINAL = ("completed", "denied", "failed", "interrupted", "cancelled")
 
 
@@ -263,6 +255,7 @@ CONVERSIONS=frozenset({"km_to_m","m_to_km","kg_to_g","g_to_kg"})
 
 
 def validate_resource(capability,resource):
+    require_enabled(capability)
     if not isinstance(capability,str) or capability not in CAPABILITIES or not isinstance(resource,str) or not resource.strip() or resource.strip()!=resource or len(resource)>128:
         raise ValueError("Invalid capability input")
     if capability=="model_readiness" and resource!="local":

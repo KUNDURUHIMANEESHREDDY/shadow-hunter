@@ -267,3 +267,16 @@ def test_natural_language_workflow_preview_browser(page,local_runtime_enabled,lo
     expect(page.locator("#workflow-result")).to_contain_text('"value": "2000"')
     page.locator("#disconnect").click()
     expect(page.locator("#workflow-objective")).to_have_value("")
+
+
+def test_capability_catalog_browser(page,local_runtime_enabled,local_server):
+    from playwright.sync_api import expect
+    page.goto(local_server+"/local-workspace")
+    page.locator("#token").fill(CUSTOMER_TOKEN)
+    page.locator("#connect").click()
+    expect(page.locator("#capability-summary")).to_contain_text("Numeric summary")
+    expect(page.locator("#job-capability option")).to_have_count(7)
+    expect(page.locator("#job-add")).to_be_enabled()
+    page.locator("#disconnect").click()
+    expect(page.locator("#job-capability option")).to_have_count(0)
+    expect(page.locator("#job-add")).to_be_disabled()

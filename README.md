@@ -208,3 +208,7 @@ Released under the [MIT License](LICENSE). See [third-party notices](THIRD_PARTY
 ### Natural-language workflow preview
 
 Use the workflow builder's Generate plan button or POST /v1/agent/local-workflows/plan with an objective and optional order_id. The hybrid compiler grounds supported utility inputs and uses reviewed local Qwen classification for ambiguous support reads. Explicit 'then' clauses form dependency barriers; independent 'and' clauses may run together. Preview never executes tools. Review and submit the graph separately. Unsupported or ambiguous clauses require clarification; arbitrary natural-language tasks are not guaranteed.
+
+### Dynamic capability catalog
+
+GET /v1/agent/local-capabilities exposes authenticated, read-only capability metadata. The planner uses catalog matching and grounded input validation, with reviewed Qwen classification for ambiguous support requests. SHADOW_HUNTER_ENABLED_CAPABILITIES optionally restricts the seven compiled-in adapters using comma-separated names; an empty value or unknown name fails closed. The same restriction is checked by queue and graph execution, and the workspace populates its selector from the server catalog. This is an additional execution restriction, not a replacement for the policy gateway. It does not install arbitrary tools or discover external MCP servers.

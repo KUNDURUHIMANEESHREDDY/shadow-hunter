@@ -524,8 +524,8 @@ def create_app(
     @app.get("/v1/agent/local-jobs")
     def list_local_jobs(authorization: str | None = Header(default=None)):
         principal, scheduler = local_scheduler(authorization)
-        from .scheduler import CAPABILITIES
-        return {"capabilities": list(CAPABILITIES), "jobs": scheduler.list(principal),
+        from .capability_catalog import discover_capabilities
+        return {"capabilities": [item["name"] for item in discover_capabilities()], "jobs": scheduler.list(principal),
                 "automatic_enabled": auto_jobs_enabled()}
 
     @app.post("/v1/agent/local-jobs")
@@ -547,6 +547,13 @@ def create_app(
             raise HTTPException(status_code=422,detail="Invalid job") from None
         except QueueBusy:
             raise HTTPException(status_code=429,detail="Job queue busy") from None
+
+    @app.get("/v1/agent/local-capabilities")
+    def list_local_capabilities(authorization: str | None = Header(default=None)):
+        gateway_tool_principal(authorization)
+        require_local_runtime()
+        from .capability_catalog import discover_capabilities
+        return {"capabilities":discover_capabilities()}
 
     @app.post("/v1/agent/local-workflows/plan")
     def plan_local_workflow(body: dict[str, Any] = Body(...),

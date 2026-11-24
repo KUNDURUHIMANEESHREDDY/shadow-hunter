@@ -10,6 +10,7 @@ import threading
 import time
 from . import local_runtime as rt
 from .scheduler import PUBLIC_REPOSITORIES, validate_graph, validate_resource
+from .capability_catalog import matching_capabilities, enabled_names
 
 # Ground numeric resources in literal user input; never take numbers from model.
 NUMBER=r"-?[0-9]{1,8}(?:\.[0-9]{1,4})?"
@@ -20,6 +21,9 @@ UNIT_PATTERN="|".join(sorted(UNIT,key=len,reverse=True))
 CONVERSION=re.compile(r"(?<![\w.])("+NUMBER+r")\s*("+UNIT_PATTERN+r")\s+(?:to|into|in)\s+("+UNIT_PATTERN+r")\b",re.I)
 LIST=re.compile(r"(?<![\w.])"+NUMBER+r"(?:\s*,\s*"+NUMBER+r"){1,15}(?![\w.,])")
 CHANGE=re.compile(r"\b(?:submit|approve|issue|execute|process|create)\s+(?:(?:a|the|my)\s+)?refund\b|\bcancel\s+(?:(?:my|the|this)\s+)?order\b|\b(?:delete|modify|change|send|book|buy|install|write|generate|create|download|upload|run code)\b",re.I)
+
+class CapabilityUnavailable(ValueError):
+    pass
 
 def candidate_phases(objective,order_id=""):
     if not isinstance(objective,str) or not objective.strip() or len(objective)>1000:
@@ -43,6 +47,8 @@ def candidate_phases(objective,order_id=""):
             candidates=[]
             def add(capability,resource):
                 nonlocal index
+                if capability not in enabled_names():
+                    raise CapabilityUnavailable
                 validate_resource(capability,resource)
                 if any(c["capability"]==capability and c["resource"]==resource for c in candidates):
                     return
@@ -50,18 +56,20 @@ def candidate_phases(objective,order_id=""):
                 candidates.append({"id":f"n{index}","capability":capability,"resource":resource})
             if not clause:
                 return []
+            # Retrieve candidates from the catalog, then ground inputs locally.
+            matched={item.name for item in matching_capabilities(clause)}
             # Clear utility commands use exact, validated inputs and recognized operation words.
             for match in CONVERSION.finditer(clause):
                 value,source,target=match.groups()
                 key=UNIT[source.lower()]+"_to_"+UNIT[target.lower()]
-                if key in {"km_to_m","m_to_km","kg_to_g","g_to_kg"} and re.search(r"\b(convert|express|change units)\b",clause,re.I):
+                if key in {"km_to_m","m_to_km","kg_to_g","g_to_kg"} and "unit_conversion" in matched:
                     add("unit_conversion",value+":"+key)
-            if re.search(r"\b(summarize|summarise|summary|average|mean|statistics|stats|sum|minimum|maximum|analyze|analyse)\b",clause,re.I):
+            if "numeric_summary" in matched:
                 for match in LIST.finditer(clause):
                     add("numeric_summary",",".join(p.strip() for p in match.group().split(",")))
-            if re.search(r"\b(ollama|model|inference)\b",clause,re.I) and re.search(r"\b(health|ready|readiness|available|status|working)\b",clause,re.I):
+            if "model_readiness" in matched:
                 add("model_readiness","local")
-            if re.search(r"\b(metadata|stars|forks|default branch|repository info|repository details)\b",clause,re.I):
+            if "public_repo_metadata" in matched:
                 for repo in sorted(PUBLIC_REPOSITORIES):
                     if re.search(r"(?<![\w/.-])"+re.escape(repo)+r"(?![\w/.-])",clause,re.I):
                         add("public_repo_metadata",repo)
@@ -71,7 +79,7 @@ def candidate_phases(objective,order_id=""):
                     return []
                 group.append((clause,candidates,True))
                 continue
-            if order_id and re.search(r"\b(order|purchase|refund|refundable|eligib)",clause,re.I):
+            if order_id and matched.intersection({"order_summary","refund_status"}):
                 # Explicit read vocabulary provides grounded coverage without model omissions.
                 details=bool(re.search(r"\b(?:order|purchase)\s+(?:details|information|currency)\b|\b(?:remaining|left)\s+(?:refundable|refund)\b|\b(?:currency|balance)\b",clause,re.I))
                 eligibility=bool(re.search(r"\b(?:eligibility|eligible|qualify|qualifies|can be refunded|can .*?be refunded|refund is possible|refund is available)\b",clause,re.I))
@@ -80,8 +88,11 @@ def candidate_phases(objective,order_id=""):
                     if eligibility: add("refund_status",order_id)
                     group.append((clause,candidates,True))
                 else:
-                    add("order_summary",order_id)
-                    add("refund_status",order_id)
+                    # Preserve the full classification vocabulary even if a tool is disabled.
+                    # The selected intent is checked against the current policy afterward.
+                    for capability in ("order_summary","refund_status"):
+                        index+=1
+                        candidates.append({"id":f"n{index}","capability":capability,"resource":order_id})
                     group.append((clause,candidates,False))
                 continue
             return []
@@ -107,7 +118,10 @@ def _select(phase,candidates,deadline):
 
 
 def plan_workflow(objective,order_id=""):
-    phases=candidate_phases(objective,order_id)
+    try:
+        phases=candidate_phases(objective,order_id)
+    except CapabilityUnavailable:
+        return {"status":"clarify","nodes":[],"message":"A requested capability is disabled or unavailable."}
     if not phases:
         return {"status":"clarify","nodes":[],"message":"No fully grounded supported workflow. Specify supported operations and inputs."}
     needs_model=any(not grounded for group in phases for _,_,grounded in group)
@@ -134,6 +148,8 @@ def plan_workflow(objective,order_id=""):
                     selected=_select(clause,candidates,deadline)
                 if not selected:
                     return {"status":"clarify","nodes":[],"message":"The planner could not map all clauses to supported operations."}
+                if any(c["id"] in selected and c["capability"] not in enabled_names() for c in candidates):
+                    return {"status":"clarify","nodes":[],"message":"A requested capability is disabled or unavailable."}
                 for c in candidates:
                     identity=(c["capability"],c["resource"])
                     if c["id"] in selected and identity not in seen:
