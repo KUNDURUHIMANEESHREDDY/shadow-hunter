@@ -403,3 +403,67 @@ The source for the CLI and operator endpoint is the same packaged evaluator:
 policy enforcement, and audit consistency, **not** real remote agents, Cognito
 delegation, AWS policy Gateway, cloud LLM reasoning, or immutable-log integrity.
 A passing local simulation is not a production release gate.
+
+## Local read-only support runtime (development only)
+
+The opt-in endpoint `POST /v1/agent/local-readonly` accepts an authenticated
+local customer tool token and a JSON object containing `prompt` and
+`order_id`. Set `SHADOW_HUNTER_LOCAL_READONLY_ENABLED=true` only for a local
+SQLite development environment with the local Ollama server running and
+`qwen3.5:0.8b` installed. The default is disabled. It is unavailable in
+Cognito mode and AWS Lambda.
+
+The model selects one of four bounded intents; the application determines the
+fixed read-only tools and uses the supplied order ID, trusted authenticated
+principal, existing policy gateway and shared trace ID. Refund creation and
+execution, arbitrary tools, and hosted inference are not supported. Model
+errors stop the task; a denied tool stops remaining steps. This feature is
+not a replacement for the managed AgentCore identity and Gateway path.
+
+Offline regression: `python -m pytest tests/test_local_runtime.py -q`.
+The real-model HTTP test in `tests/e2e/test_local_runtime_live.py` requires
+explicit `RUN_LOCAL_QWEN_E2E=1`; it uses only fictional orders in a temporary
+database. A completed response confirms the selected plan ran, not that the
+model understood every possible request.
+
+### Local orchestration verification
+
+The runtime performs two separately prompted, schema-constrained classifications
+with the same local model. The model receives the task text only. Disagreement
+returns `clarify` with no tool invocation. Malformed responses get at most one
+retry per classification; transport failures stop immediately. The planner
+uses a shared 45-second planning budget for request timeout allocation and a
+nonblocking in-process lock to avoid competing inference calls.
+
+For an agreed supported intent, fixed application code creates the approved
+read-only plan. Each invocation uses the authenticated principal, explicit
+order ID, unique request ID and shared trace ID. An independent deterministic
+check reconciles its result with a persisted policy event, including identity,
+resource, tool, policy metadata and decision. Result shapes are validated;
+compound tasks also check that order details and eligibility agree. A denial,
+missing or duplicate audit event, or inconsistent result prevents successful
+completion. The response includes a plan, verified step count and a stage
+timeline (returned after the run, not a live event stream).
+
+Both planning passes use the same small model; agreement is not independent
+model attestation or proof that the requested intent was correctly understood.
+No arbitrary tool execution or write operations are enabled. The audit check
+is local evidence consistency, not an immutable external attestation.
+
+### Incremental local progress
+
+The authenticated development-only endpoint
+`POST /v1/agent/local-readonly/stream` accepts the same JSON body and identity
+as the synchronous route. It streams newline-delimited JSON progress events
+before planning and before each tool invocation, followed by a verified
+step event after persisted evidence reconciliation. The last event is either
+a result or a sanitized error; clients must not infer completion from
+HTTP 200, an intermediate event, or an interrupted connection. The terminal
+result carries the same plan, timeline, and verified-step count as the
+synchronous endpoint. No model private reasoning, raw provider response,
+or credential is included in progress events. This is a local-only,
+read-only API stream, not an unrestricted agent or a dashboard integration.
+
+Live opt-in checks cover six ordinary support prompts, including alternate
+wording and reversed clause order. Regression tests check that progress
+precedes work and invalid evidence never yields a completed result.

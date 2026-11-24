@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 from fastapi import Body, FastAPI, Header, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from .agentcore import (
     AgentCoreHarnessClient,
@@ -461,6 +461,55 @@ def create_app(
                 detail="BAND accepted the summary, but audit confirmation failed",
             ) from exc
         return {"provider": "band", "published": True, "summary_only": True}
+
+    def local_task_inputs(body, authorization):
+        principal = gateway_tool_principal(authorization)
+        if (
+            os.environ.get("SHADOW_HUNTER_LOCAL_READONLY_ENABLED", "").lower() != "true"
+            or os.environ.get("SHADOW_HUNTER_AUTH_MODE", "local").lower() != "local"
+            or not isinstance(store, SQLiteStore)
+            or os.environ.get("AWS_LAMBDA_FUNCTION_NAME")
+        ):
+            raise HTTPException(status_code=503, detail="Local read-only runtime disabled")
+        if set(body) != {"prompt", "order_id"}:
+            raise HTTPException(status_code=422, detail="Expected prompt and order_id")
+        prompt, order_id = body["prompt"], body["order_id"]
+        if (not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 1000
+                or not isinstance(order_id, str) or not order_id.strip()
+                or len(order_id) > 128 or order_id.strip() != order_id):
+            raise HTTPException(status_code=422, detail="Invalid local task")
+        return principal, prompt, order_id
+
+    @app.post("/v1/agent/local-readonly")
+    def local_readonly_chat(
+        body: dict[str, Any] = Body(...),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        from .local_runtime import LocalRuntimeError, run_readonly_task
+        principal, prompt, order_id = local_task_inputs(body, authorization)
+        try:
+            return run_readonly_task(gateway, principal, prompt=prompt, order_id=order_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Invalid local task") from exc
+        except (LocalRuntimeError, GatewayError):
+            raise HTTPException(status_code=503, detail="Local task could not complete") from None
+
+    @app.post("/v1/agent/local-readonly/stream")
+    def local_readonly_stream(
+        body: dict[str, Any] = Body(...),
+        authorization: str | None = Header(default=None),
+    ):
+        import json
+        from .local_runtime import LocalRuntimeError, iter_readonly_task
+        principal, prompt, order_id = local_task_inputs(body, authorization)
+        def events():
+            try:
+                for event in iter_readonly_task(gateway, principal, prompt=prompt, order_id=order_id):
+                    yield json.dumps(event, ensure_ascii=True) + "\n"
+            except (LocalRuntimeError, GatewayError, StoreError, ValueError):
+                yield json.dumps({"type": "error", "status": "failed", "message": "Task could not be verified"}) + "\n"
+        return StreamingResponse(events(), media_type="application/x-ndjson",
+                                 headers={"X-Accel-Buffering": "no", "Cache-Control": "no-store"})
 
     @app.post("/v1/agent/chat")
     def agent_chat(
