@@ -221,6 +221,8 @@ def _verify_step(gateway: ToolGateway, principal: Principal, *, trace: str,
     if (type(data.get(flag)) is not bool or type(amount) is not int or amount < 0
             or not isinstance(data.get("currency"), str) or len(data["currency"]) != 3):
         raise LocalRuntimeError("Invalid read result")
+    if key == "eligibility" and data["eligible"] and amount == 0:
+        raise LocalRuntimeError("Inconsistent eligibility result")
 
 def iter_readonly_task(gateway: ToolGateway, principal: Principal, *,
                        prompt: str, order_id: str) -> Iterator[dict[str, Any]]:
@@ -251,8 +253,16 @@ def iter_readonly_task(gateway: ToolGateway, principal: Principal, *,
                                     + order["currency"] + ").")
                 elif step["tool"] == "check_refund_eligibility":
                     eligibility = data["eligibility"]
-                    messages.append("Refund eligibility: "
-                                    + ("eligible." if eligibility["eligible"] else "not eligible."))
+                    amount = eligibility["refundable_minor"]
+                    if eligibility["eligible"]:
+                        messages.append("Refund eligibility: eligible under the recorded rules. "
+                                        "Remaining refundable balance: "
+                                        + str(amount) + " minor units (" + eligibility["currency"] + ").")
+                    elif amount == 0:
+                        messages.append("Refund eligibility: not eligible. No refundable balance remains.")
+                    else:
+                        messages.append("Refund eligibility: not eligible under the recorded rules. "
+                                        "The specific reason is not available in this read result.")
             answer = " ".join(messages)
         else:
             answer = {

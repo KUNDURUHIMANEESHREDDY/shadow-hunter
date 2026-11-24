@@ -340,3 +340,67 @@ def test_read_questions_remain_available(monkeypatch, prompt):
     monkeypatch.setattr(rt, "_classify", classifier)
     assert rt.plan_readonly_task(prompt) == "refund_eligibility"
     assert classifier.call_count == 2
+
+
+@pytest.mark.parametrize("balance, eligible, expected", [
+    (1000, True, "eligible under the recorded rules"),
+    (0, True, "No refundable balance remains"),
+    (1000, False, "specific reason is not available"),
+])
+def test_eligibility_explanation_uses_only_verified_fields(monkeypatch, runtime, balance, eligible, expected):
+    gateway, principal = runtime
+    gateway.store.add_order(order_id="sample-order", tenant_id=principal.tenant_id,
+                            customer_id=principal.customer_id, currency="USD",
+                            refundable_minor=balance, refund_eligible=eligible)
+    monkeypatch.setattr(rt, "plan_readonly_task", lambda prompt: "refund_eligibility")
+    result = rt.run_readonly_task(gateway, principal, prompt="why eligible?", order_id="sample-order")
+    assert result["status"] == "completed"
+    assert expected in result["answer"]
+    assert result["verified_steps"] == 1
+
+
+def test_impossible_eligibility_cannot_complete(monkeypatch, runtime):
+    gateway, principal = runtime
+    original = gateway.invoke
+    def inconsistent(**kwargs):
+        result = original(**kwargs)
+        result["eligibility"]["refundable_minor"] = 0
+        return result
+    monkeypatch.setattr(gateway, "invoke", inconsistent)
+    monkeypatch.setattr(rt, "plan_readonly_task", lambda prompt: "refund_eligibility")
+    with pytest.raises(rt.LocalRuntimeError, match="Inconsistent eligibility"):
+        rt.run_readonly_task(gateway, principal, prompt="check eligibility", order_id="sample-order")
+
+
+def test_overlapping_independent_support_reads_preserve_account_isolation(monkeypatch, runtime):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    gateway, first = runtime
+    second = Principal("second-subject", "second-tenant", "second-customer", True)
+    gateway.store.add_order(order_id="second-order", tenant_id=second.tenant_id,
+                            customer_id=second.customer_id, currency="EUR", refundable_minor=700)
+    monkeypatch.setattr(rt, "plan_readonly_task", lambda prompt: "both")
+    original = gateway.invoke
+    barrier = Barrier(2, timeout=10)
+    def overlapping(**kwargs):
+        if kwargs["tool_name"] == "get_order":
+            barrier.wait()
+        return original(**kwargs)
+    monkeypatch.setattr(gateway, "invoke", overlapping)
+    def run(principal, order_id):
+        return list(rt.tracked_readonly_task(gateway, principal, prompt="show and check", order_id=order_id))[-1]["result"]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        a = pool.submit(run, first, "sample-order")
+        b = pool.submit(run, second, "second-order")
+        results = [a.result(timeout=15), b.result(timeout=15)]
+    assert [r["status"] for r in results] == ["completed", "completed"]
+    assert results[0]["trace_id"] != results[1]["trace_id"]
+    for result, principal, order_id, currency in zip(results, (first, second), ("sample-order", "second-order"), ("USD", "EUR")):
+        assert result["steps"][0]["result"]["order"]["order_id"] == order_id
+        assert result["steps"][0]["result"]["order"]["currency"] == currency
+        assert result["verified_steps"] == 2
+        history = gateway.store.list_local_tasks(principal)
+        assert len(history) == 1 and history[0]["trace_id"] == result["trace_id"]
+        audit = [e for e in gateway.store.get_trace_events(result["trace_id"]) if e["event_type"] == "POLICY_DECISION"]
+        assert len(audit) == 2
+        assert all(e["actor_id"] == principal.subject_id and e["tenant_id"] == principal.tenant_id and e["resource_id"] == order_id for e in audit)
