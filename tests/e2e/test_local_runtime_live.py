@@ -180,3 +180,22 @@ def test_local_support_intent_boundary_live(local_runtime_enabled, local_server)
                           "expected": expected, "actual": actual, "pass": ok}), flush=True)
     print(f"SUPPORT BOUNDARY BENCHMARK: {sum(outcomes)}/{len(outcomes)}", flush=True)
     assert all(outcomes)
+
+
+def test_model_readiness_requires_auth(local_runtime_enabled, local_server):
+    from urllib.error import HTTPError
+    req = urllib.request.Request(local_server + "/v1/agent/local-readonly/readiness")
+    with pytest.raises(HTTPError) as exc:
+        urllib.request.urlopen(req, timeout=5)
+    assert exc.value.code == 401
+
+
+@pytest.mark.skipif(os.environ.get("RUN_LOCAL_QWEN_E2E") != "1", reason="Explicit local Qwen opt-in")
+def test_model_readiness_live(local_runtime_enabled, local_server):
+    req = urllib.request.Request(
+        local_server + "/v1/agent/local-readonly/readiness",
+        headers={"Authorization": "Bearer " + CUSTOMER_TOKEN},
+    )
+    with urllib.request.urlopen(req, timeout=5) as response:
+        assert response.headers.get("Cache-Control") == "no-store"
+        assert json.load(response) == {"model": "qwen3.5:0.8b", "status": "ready", "ready": True}
