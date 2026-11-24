@@ -738,3 +738,101 @@ def test_waiting_support_planner_still_times_out_without_cancellation(monkeypatc
         slots.release()
     finally:
         lock.release()
+
+
+def test_abortable_inference_closes_transport_while_waiting(monkeypatch):
+    import asyncio
+    import httpx2
+    import time
+    from contextlib import asynccontextmanager
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    entered, closed, signal = Event(), Event(), Event()
+
+    class WaitingClient:
+        def __init__(self, **kwargs):
+            assert kwargs["trust_env"] is False
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        @asynccontextmanager
+        async def stream(self, *args, **kwargs):
+            entered.set()
+            try:
+                await asyncio.sleep(60)
+                yield None
+            finally:
+                closed.set()
+
+    monkeypatch.setattr(httpx2, "AsyncClient", WaitingClient)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        task = pool.submit(lambda: asyncio.run(rt._abortable_model_request(
+            {}, timeout=35, cancellation=signal)))
+        try:
+            assert entered.wait(2)
+            started = time.monotonic()
+            signal.set()
+            with pytest.raises(rt.TaskInterrupted):
+                task.result(timeout=2)
+            assert time.monotonic() - started < 2
+            assert closed.is_set()
+        finally:
+            signal.set()
+
+
+def test_two_planner_sessions_overlap_and_cleanup(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier, BoundedSemaphore
+    slots, active = BoundedSemaphore(4), BoundedSemaphore(2)
+    overlap = Barrier(2)
+    monkeypatch.setattr(rt, "_ADMISSION", slots)
+    monkeypatch.setattr(rt, "_LOCK", active)
+
+    def classify(prompt, *, review, deadline):
+        if not review:
+            overlap.wait(timeout=3)
+        return prompt
+
+    monkeypatch.setattr(rt, "_classify", classify)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        a = pool.submit(rt.plan_readonly_task, "order_details")
+        b = pool.submit(rt.plan_readonly_task, "refund_eligibility")
+        assert a.result(timeout=5) == "order_details"
+        assert b.result(timeout=5) == "refund_eligibility"
+    assert all(slots.acquire(False) for _ in range(4))
+    assert all(active.acquire(False) for _ in range(2))
+
+
+def test_workflow_capacity_and_generator_close_release(monkeypatch, runtime):
+    from threading import BoundedSemaphore
+    gateway, principal = runtime
+    monkeypatch.setattr(rt, "_WORKFLOW_SLOTS", BoundedSemaphore(1))
+    first = rt.iter_readonly_task(gateway, principal, prompt="view", order_id="sample-order")
+    assert next(first)["stage"] == "planning"
+    try:
+        with pytest.raises(rt.PlannerBusy, match="capacity"):
+            next(rt.iter_readonly_task(gateway, principal, prompt="view", order_id="sample-order"))
+    finally:
+        first.close()
+    next_task = rt.iter_readonly_task(gateway, principal, prompt="view", order_id="sample-order")
+    assert next(next_task)["stage"] == "planning"
+    next_task.close()
+
+
+def test_invalid_later_capability_rejected_before_first_read(monkeypatch, runtime):
+    gateway, principal = runtime
+    monkeypatch.setattr(rt, "plan_readonly_task", lambda prompt: "both")
+    monkeypatch.setattr(rt, "support_workflow", lambda intent: [
+        {"id": "get_order", "depends_on": []},
+        {"id": "create_refund_request", "depends_on": ["get_order"]},
+    ])
+    invoke = Mock()
+    monkeypatch.setattr(gateway, "invoke", invoke)
+    with pytest.raises(rt.LocalRuntimeError, match="capability"):
+        rt.run_readonly_task(gateway, principal, prompt="view", order_id="sample-order")
+    invoke.assert_not_called()

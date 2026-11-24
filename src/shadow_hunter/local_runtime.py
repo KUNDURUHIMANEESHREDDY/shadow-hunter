@@ -1,7 +1,9 @@
 """Bounded, local-only orchestration for authenticated read-only support."""
 from __future__ import annotations
 
+import asyncio
 import json
+from contextvars import ContextVar
 import re
 import threading
 import time
@@ -12,6 +14,7 @@ from uuid import uuid4
 
 from .gateway import ToolGateway, public_tool_result
 from .policy import Principal
+from .orchestration import DependencyLedger
 
 MODEL = "qwen3.5:0.8b"
 PLANS = {
@@ -23,9 +26,11 @@ PLANS = {
 AGENT_ID = "local-readonly-support"
 PLAN_TIMEOUT = 45.0
 QUEUE_TIMEOUT = 5.0
-# One active planner plus one bounded waiting request; no tool permissions change.
-_ADMISSION = threading.BoundedSemaphore(2)
-_LOCK = threading.Lock()
+# Two independent planner sessions, with two bounded waiting slots.
+_ADMISSION = threading.BoundedSemaphore(4)
+_LOCK = threading.BoundedSemaphore(2)
+_INFERENCE_CANCELLATION: ContextVar[threading.Event | None] = ContextVar('inference_cancellation', default=None)
+_WORKFLOW_SLOTS = threading.BoundedSemaphore(8)
 
 class LocalRuntimeError(RuntimeError):
     pass
@@ -131,6 +136,45 @@ def _proposal_intent(answer: Any) -> str:
     return "both" if len(reads) == 2 else reads[0] if reads else "unsupported"
 
 
+async def _abortable_model_request(body: dict, *, timeout: float,
+                                   cancellation: threading.Event) -> bytes:
+    """Cancel the request and close its HTTP connection, not a shared model process."""
+    import httpx2
+
+    async def read() -> bytes:
+        async with httpx2.AsyncClient(trust_env=False, timeout=timeout,
+                                     follow_redirects=False) as client:
+            async with client.stream("POST", "http://127.0.0.1:11434/api/chat",
+                                     json=body) as response:
+                response.raise_for_status()
+                data = bytearray()
+                async for chunk in response.aiter_bytes():
+                    data.extend(chunk[:65537-len(data)])
+                    if len(data) >= 65537:
+                        break
+                return bytes(data)
+
+    _checkpoint(cancellation)
+    task = asyncio.create_task(read())
+    deadline = time.monotonic() + timeout
+    try:
+        while True:
+            _checkpoint(cancellation)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ModelUnavailable("Local model request timed out")
+            done, _ = await asyncio.wait({task}, timeout=min(0.05, remaining))
+            _checkpoint(cancellation)
+            if done:
+                return task.result()
+    except httpx2.HTTPError as exc:
+        raise ModelUnavailable("Local model unavailable") from exc
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
 def _classify(prompt: str, *, review: bool, deadline: float) -> str:
     schema = {
         "type": "object",
@@ -196,9 +240,14 @@ def _classify(prompt: str, *, review: bool, deadline: float) -> str:
             headers={"Content-Type": "application/json"},
         )
         try:
-            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-            with opener.open(request, timeout=min(35.0, remaining)) as response:
-                raw = response.read(65537)
+            cancellation = _INFERENCE_CANCELLATION.get()
+            if cancellation is not None:
+                raw = asyncio.run(_abortable_model_request(
+                    body, timeout=min(35.0, remaining), cancellation=cancellation))
+            else:
+                opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                with opener.open(request, timeout=min(35.0, remaining)) as response:
+                    raw = response.read(65537)
         except (OSError, urllib.error.URLError) as exc:
             # Do not keep retrying an unavailable model.
             raise ModelUnavailable("Local model unavailable") from exc
@@ -249,6 +298,7 @@ def plan_readonly_task(prompt: str, *, cancellation: threading.Event | None = No
     if not _ADMISSION.acquire(blocking=False):
         raise PlannerBusy("Local planning queue full")
     acquired = False
+    token = _INFERENCE_CANCELLATION.set(cancellation)
     try:
         if cancellation is None:
             acquired = _LOCK.acquire(timeout=QUEUE_TIMEOUT)
@@ -276,6 +326,7 @@ def plan_readonly_task(prompt: str, *, cancellation: threading.Event | None = No
             return "clarify"
         return proposal
     finally:
+        _INFERENCE_CANCELLATION.reset(token)
         if acquired:
             _LOCK.release()
         _ADMISSION.release()
@@ -331,7 +382,7 @@ def _verify_step(gateway: ToolGateway, principal: Principal, *, trace: str,
     if key == "eligibility" and data["eligible"] and amount == 0:
         raise LocalRuntimeError("Inconsistent eligibility result")
 
-def iter_readonly_task(gateway: ToolGateway, principal: Principal, *,
+def _iter_readonly_task(gateway: ToolGateway, principal: Principal, *,
                        prompt: str, order_id: str,
                        cancellation: threading.Event | None = None) -> Iterator[dict[str, Any]]:
     if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 1000:
@@ -349,6 +400,12 @@ def iter_readonly_task(gateway: ToolGateway, principal: Principal, *,
     if not isinstance(intent, str) or (intent not in PLANS and intent != "clarify"):
         raise LocalRuntimeError("Invalid plan")
     workflow = support_workflow(intent)
+    # Validate the full graph before invoking any tool, including nodes after
+    # the first read. Only the exact server-owned capability graph is permitted.
+    expected = [{"id": tool, "depends_on": list(PLANS.get(intent, ())[:index])}
+                for index, tool in enumerate(PLANS.get(intent, ()))]
+    if workflow != expected:
+        raise LocalRuntimeError("Invalid workflow dependency or capability")
     plan = [node["id"] for node in workflow]
     steps = []
     timeline = [{"stage": "planning", "status": "reviewed"}]
@@ -393,10 +450,10 @@ def iter_readonly_task(gateway: ToolGateway, principal: Principal, *,
     # At most one fresh read of the whole compound plan. Never retry a denial
     # or failed audit verification; those must stop execution immediately.
     for attempt in range(2):
-        verified = set()
+        ledger = DependencyLedger.compile(workflow, allowed=frozenset(sum(PLANS.values(), ())))
         for node in workflow:
             _checkpoint(cancellation)
-            if not set(node["depends_on"]).issubset(verified):
+            if node["id"] not in ledger.ready():
                 raise LocalRuntimeError("Unverified workflow dependency")
             tool = node["id"]
             request_id = str(uuid4())
@@ -416,7 +473,7 @@ def iter_readonly_task(gateway: ToolGateway, principal: Principal, *,
                 timeline.append({"stage": "completion", "status": "denied"})
                 yield {"type": "result", "result": response("denied")}
                 return
-            verified.add(tool)
+            ledger.mark_verified(tool)
         if len(steps) != 2:
             break
         order = steps[0]["result"]["order"]
@@ -435,6 +492,20 @@ def iter_readonly_task(gateway: ToolGateway, principal: Principal, *,
     _checkpoint(cancellation)
     timeline.append({"stage": "completion", "status": "verified"})
     yield {"type": "result", "result": response("completed")}
+
+
+def iter_readonly_task(gateway: ToolGateway, principal: Principal, *,
+                       prompt: str, order_id: str,
+                       cancellation: threading.Event | None = None) -> Iterator[dict[str, Any]]:
+    """Bound independent workflow lifetimes across streamed and ordinary requests."""
+    _checkpoint(cancellation)
+    if not _WORKFLOW_SLOTS.acquire(blocking=False):
+        raise PlannerBusy("Local workflow capacity reached")
+    try:
+        yield from _iter_readonly_task(gateway, principal, prompt=prompt,
+                                       order_id=order_id, cancellation=cancellation)
+    finally:
+        _WORKFLOW_SLOTS.release()
 
 
 def run_readonly_task(gateway: ToolGateway, principal: Principal, *,

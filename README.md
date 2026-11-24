@@ -27,7 +27,7 @@ AI agents can misunderstand instructions, propose invalid actions or encounter u
 | Human approval | Expiring, parameter-bound, single-use approval capabilities; operator-only refund execution |
 | Audit and history | Correlated decision records, trace queries and account-scoped local task history |
 | Operator console | Policy evidence, approvals, operational settings and evaluation results |
-| Runtime controls | Model readiness, bounded planning admission, cooperative cancellation and queue timeouts |
+| Runtime controls | Model readiness, two concurrent planner sessions, bounded workflow admission, cancellable inference HTTP requests and queue timeouts |
 
 The local model workspace is restricted to order information and refund eligibility. Refund-request creation is available through the separate governed tool interface; actual refund execution is never exposed as a model tool. Demo refund execution updates an internal ledger, not a payment provider.
 
@@ -124,7 +124,7 @@ Open [the operator console](http://127.0.0.1:8000/operator), authenticate with t
 
 > Show my order details and check refund eligibility.
 
-The workspace displays the verified result, live activity and task history. Cancellation requests stop at checkpoints; an in-progress inference call may still need to finish or time out.
+The workspace displays the verified result, live activity and task history. Cancellation closes the active streamed-task inference HTTP request and stops at subsequent execution checkpoints. Ollama's internal compute interruption has not been independently verified.
 
 ### Local interfaces
 
@@ -184,9 +184,9 @@ See [sponsor integrations](docs/sponsor-integrations.md), [keyless authenticatio
 
 ## Scope and roadmap
 
-The prototype currently supports one bounded customer-support workload. The model planner is serial, with one active planning session, one waiting request, a five-second queue wait and a 45-second planning budget. Independent customer workflow isolation has been tested using a controlled planner; parallel model inference and a dedicated independent-workflow scheduler are not implemented. Cancellation is cooperative, not guaranteed immediate interruption of active inference.
+The prototype currently supports one bounded customer-support workload. The local planner admits two concurrent planning sessions and two waiting requests, with a five-second queue wait and a 45-second planning budget. Eight workflow lifetimes may be admitted at once. The dependency ledger validates the entire allowlisted graph and exposes ready nodes; the support workload retains serial dependent reads and gateway verification. Streamed inference cancellation closes its HTTP request without terminating the shared Ollama process. Two concurrent live requests returned correct plans in 6.156 seconds; this does not prove parallel compute inside Ollama. A dedicated persistent scheduler and broader approved capability adapters are still pending.
 
-Further work includes broader approved support coverage, repeatable live-model reliability measurements, latest-patch full regression and browser testing, and independent production verification. No production-ready deployment or verified public demo is claimed.
+Further work includes broader approved support coverage, a durable scheduler, verified Ollama compute cancellation and parallelism, repeatable live-model reliability measurements, latest-patch full regression and browser testing, and independent production verification. No production-ready deployment or verified public demo is claimed.
 
 ## Repository guide
 
