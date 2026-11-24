@@ -250,7 +250,17 @@ def plan_readonly_task(prompt: str, *, cancellation: threading.Event | None = No
         raise PlannerBusy("Local planning queue full")
     acquired = False
     try:
-        acquired = _LOCK.acquire(timeout=QUEUE_TIMEOUT)
+        if cancellation is None:
+            acquired = _LOCK.acquire(timeout=QUEUE_TIMEOUT)
+        else:
+            queue_deadline = time.monotonic() + QUEUE_TIMEOUT
+            while not acquired:
+                _checkpoint(cancellation)
+                remaining = queue_deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                acquired = _LOCK.acquire(timeout=min(0.05, remaining))
+            _checkpoint(cancellation)
         if not acquired:
             raise PlannerBusy("Local planning queue timeout")
         _checkpoint(cancellation)

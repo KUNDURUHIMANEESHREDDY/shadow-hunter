@@ -678,3 +678,63 @@ def test_live_model_cancellation_checkpoint(monkeypatch, runtime):
     assert row["status"] == "interrupted" and row["verified_steps"] == 0
     print("LIVE QWEN: proposal returned; cancellation prevented review and tool invocation",
           flush=True)
+
+
+def test_cancel_waiting_support_planner_releases_admission_before_active_plan_finishes(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import BoundedSemaphore, Event, Lock
+
+    waiting = Event()
+    signal = Event()
+    slots = BoundedSemaphore(2)
+    inner = Lock()
+    assert inner.acquire(False)
+
+    class ObservedLock:
+        def acquire(self, **kwargs):
+            waiting.set()
+            return inner.acquire(**kwargs)
+
+        def release(self):
+            inner.release()
+
+    monkeypatch.setattr(rt, "_ADMISSION", slots)
+    monkeypatch.setattr(rt, "_LOCK", ObservedLock())
+    monkeypatch.setattr(rt, "QUEUE_TIMEOUT", 5.0)
+    classify = Mock()
+    monkeypatch.setattr(rt, "_classify", classify)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(rt.plan_readonly_task, "show order", cancellation=signal)
+        try:
+            assert waiting.wait(timeout=2)
+            signal.set()
+            with pytest.raises(rt.TaskInterrupted):
+                future.result(timeout=2)
+            assert inner.locked()
+            classify.assert_not_called()
+            assert slots.acquire(False) and slots.acquire(False)
+            slots.release()
+            slots.release()
+        finally:
+            inner.release()
+
+
+def test_waiting_support_planner_still_times_out_without_cancellation(monkeypatch):
+    from threading import BoundedSemaphore, Event, Lock
+
+    slots, lock = BoundedSemaphore(2), Lock()
+    assert lock.acquire(False)
+    monkeypatch.setattr(rt, "_ADMISSION", slots)
+    monkeypatch.setattr(rt, "_LOCK", lock)
+    monkeypatch.setattr(rt, "QUEUE_TIMEOUT", 0.02)
+    classify = Mock()
+    monkeypatch.setattr(rt, "_classify", classify)
+    try:
+        with pytest.raises(rt.PlannerBusy, match="queue timeout"):
+            rt.plan_readonly_task("show order", cancellation=Event())
+        classify.assert_not_called()
+        assert slots.acquire(False) and slots.acquire(False)
+        slots.release()
+        slots.release()
+    finally:
+        lock.release()
