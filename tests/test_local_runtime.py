@@ -554,3 +554,61 @@ def test_stop_registry_is_account_scoped_and_bounded(runtime):
     registry.remove("0", signals[0])
     assert not registry.request(principal, "0")
     registry.register(principal, "8", signals[8])
+
+
+def test_authenticated_cancellation_http_boundary(monkeypatch, runtime):
+    import json
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from fastapi.testclient import TestClient
+    from shadow_hunter.auth import TokenAuthenticator
+    from shadow_hunter.api import create_app
+
+    gateway, principal = runtime
+    monkeypatch.setenv("SHADOW_HUNTER_AUTH_MODE", "local")
+    monkeypatch.setenv("SHADOW_HUNTER_LOCAL_READONLY_ENABLED", "true")
+    monkeypatch.delenv("AWS_LAMBDA_FUNCTION_NAME", raising=False)
+    auth = TokenAuthenticator(customer_tokens={
+        "local-owner": {"subject_id": principal.subject_id, "tenant_id": principal.tenant_id,
+                        "customer_id": principal.customer_id},
+        "local-other": {"subject_id": "other-subject", "tenant_id": principal.tenant_id,
+                        "customer_id": "other-customer"},
+    }, operator_tokens={})
+    app = create_app(store=gateway.store, authenticator=auth)
+    entered, release = Event(), Event()
+
+    def controlled_plan(prompt, *, cancellation=None):
+        entered.set()
+        if not release.wait(timeout=10):
+            raise RuntimeError("Test did not release planner")
+        return "both"
+
+    monkeypatch.setattr(rt, "plan_readonly_task", controlled_plan)
+    owner = {"Authorization": "Bearer local-owner"}
+    other = {"Authorization": "Bearer local-other"}
+    stream_path = "/v1/agent/local-readonly/stream"
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(
+            TestClient(app).post, stream_path, headers=owner,
+            json={"prompt": "show order and check eligibility", "order_id": "sample-order"}
+        )
+        try:
+            assert entered.wait(timeout=5)
+            rows = gateway.store.list_local_tasks(principal)
+            assert len(rows) == 1
+            trace = rows[0]["trace_id"]
+            path = "/v1/agent/local-readonly/cancel/" + trace
+            client = TestClient(app)
+            assert client.post(path).status_code == 401
+            assert client.post(path, headers=other).status_code == 404
+            assert client.post(path, headers=owner).json() == {"status": "cancellation_requested"}
+        finally:
+            release.set()
+        response = future.result(timeout=10)
+    assert response.status_code == 200
+    events = [json.loads(line) for line in response.text.splitlines()]
+    assert events[-1]["type"] == "error" and events[-1]["status"] == "interrupted"
+    assert not any(event["type"] == "result" for event in events)
+    assert gateway.store.list_local_tasks(principal)[0]["status"] == "interrupted"
+    assert not gateway.store.get_trace_events(trace)
+    assert TestClient(app).post(path, headers=owner).status_code == 404
