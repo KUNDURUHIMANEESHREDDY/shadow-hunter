@@ -86,39 +86,33 @@ import pytest
 from .conftest import CUSTOMER_TOKEN, FOREIGN_TOKEN, OWN_ORDER
 
 @pytest.mark.skipif(os.environ.get("RUN_LOCAL_QWEN_E2E")!="1", reason="Explicit local Qwen opt-in")
-def test_workspace_in_real_browser(local_runtime_enabled, local_server):
-    from playwright.sync_api import sync_playwright, expect
-    with sync_playwright() as p:
-        browser=p.chromium.launch(channel="msedge",headless=True)
-        try:
-            page=browser.new_page()
-            page.goto(local_server+"/local-workspace")
-            page.locator("#token").fill(CUSTOMER_TOKEN)
-            page.locator("#connect").click()
-            expect(page.locator("#status")).to_have_text("Connected to local account.")
-            page.locator("#model-check").click()
-            expect(page.locator("#model-status")).to_have_text("Local Qwen model detected.")
-            expect(page.locator("#stop")).to_have_text("Request cancellation")
-            expect(page.locator("#stop")).to_be_disabled()
-            page.locator("#order").fill(OWN_ORDER)
-            page.locator("#prompt").fill("Show my order details and check refund eligibility.")
-            page.locator("#run").click()
-            expect(page.locator("#activity")).to_contain_text("planning / started",timeout=10000)
-            expect(page.locator("#status")).to_have_text("Task status: completed",timeout=60000)
-            result=json.loads(page.locator("#result").inner_text())
-            assert result["verified_steps"]==2
-            expect(page.locator("#history")).to_contain_text(result["trace_id"],timeout=5000)
-            expect(page.locator("#history")).to_contain_text("completed")
-            assert page.evaluate("() => localStorage.length + sessionStorage.length")==0
-            page.locator("#disconnect").click()
-            expect(page.locator("#history")).to_be_empty()
-            expect(page.locator("#result")).to_have_text("No result yet.")
-            page.locator("#token").fill(FOREIGN_TOKEN)
-            page.locator("#connect").click()
-            expect(page.locator("#status")).to_have_text("Connected to local account.")
-            expect(page.locator("#history")).to_be_empty()
-        finally:
-            browser.close()
+def test_workspace_in_real_browser(page, local_runtime_enabled, local_server):
+    from playwright.sync_api import expect
+    page.goto(local_server+"/local-workspace")
+    page.locator("#token").fill(CUSTOMER_TOKEN)
+    page.locator("#connect").click()
+    expect(page.locator("#status")).to_have_text("Connected to local account.")
+    page.locator("#model-check").click()
+    expect(page.locator("#model-status")).to_have_text("Local Qwen model detected.")
+    expect(page.locator("#stop")).to_have_text("Request cancellation")
+    expect(page.locator("#stop")).to_be_disabled()
+    page.locator("#order").fill(OWN_ORDER)
+    page.locator("#prompt").fill("Show my order details and check refund eligibility.")
+    page.locator("#run").click()
+    expect(page.locator("#activity")).to_contain_text("planning / started",timeout=10000)
+    expect(page.locator("#status")).to_have_text("Task status: completed",timeout=60000)
+    result=json.loads(page.locator("#result").inner_text())
+    assert result["verified_steps"]==2
+    expect(page.locator("#history")).to_contain_text(result["trace_id"],timeout=5000)
+    expect(page.locator("#history")).to_contain_text("completed")
+    assert page.evaluate("() => localStorage.length + sessionStorage.length")==0
+    page.locator("#disconnect").click()
+    expect(page.locator("#history")).to_be_empty()
+    expect(page.locator("#result")).to_have_text("No result yet.")
+    page.locator("#token").fill(FOREIGN_TOKEN)
+    page.locator("#connect").click()
+    expect(page.locator("#status")).to_have_text("Connected to local account.")
+    expect(page.locator("#history")).to_be_empty()
 
 
 @pytest.mark.skipif(os.environ.get("RUN_LOCAL_QWEN_E2E")!="1", reason="Explicit local Qwen opt-in")
@@ -205,27 +199,21 @@ def test_model_readiness_live(local_runtime_enabled, local_server):
         assert json.load(response) == {"model": "qwen3.5:0.8b", "status": "ready", "ready": True}
 
 
-def test_durable_queue_browser(local_runtime_enabled,local_server):
-    from playwright.sync_api import sync_playwright, expect
-    with sync_playwright() as p:
-        browser=p.chromium.launch(channel="msedge",headless=True)
-        try:
-            page=browser.new_page()
-            page.goto(local_server+"/local-workspace")
-            page.locator("#token").fill(CUSTOMER_TOKEN)
-            page.locator("#connect").click()
-            expect(page.locator("#status")).to_have_text("Connected to local account.")
-            page.locator("#order").fill(OWN_ORDER)
-            page.locator("#job-add").click()
-            expect(page.locator("#jobs-list")).to_contain_text("queued")
-            page.locator("#job-capability").select_option("refund_status")
-            page.locator("#job-add").click()
-            expect(page.locator("#jobs-list tr")).to_have_count(2)
-            page.locator("#jobs-run").click()
-            expect(page.locator("#jobs-list tr").filter(has_text="completed")).to_have_count(2)
-            expect(page.locator("#jobs-result")).to_contain_text("verified_steps")
-            page.locator("#disconnect").click()
-            expect(page.locator("#jobs-list tr")).to_have_count(0)
-            expect(page.locator("#jobs-result")).to_be_empty()
-        finally:
-            browser.close()
+def test_durable_queue_browser(page, local_runtime_enabled, local_server):
+    from playwright.sync_api import expect
+    page.goto(local_server+"/local-workspace")
+    page.locator("#token").fill(CUSTOMER_TOKEN)
+    page.locator("#connect").click()
+    expect(page.locator("#status")).to_have_text("Connected to local account.")
+    page.locator("#order").fill(OWN_ORDER)
+    page.locator("#job-add").click()
+    expect(page.locator("#jobs-list")).to_contain_text("queued")
+    page.locator("#job-capability").select_option("refund_status")
+    page.locator("#job-add").click()
+    expect(page.locator("#jobs-list tr")).to_have_count(2)
+    page.locator("#jobs-run").click()
+    expect(page.locator("#jobs-list tr").filter(has_text="completed")).to_have_count(2)
+    expect(page.locator("#jobs-result")).to_contain_text("verified_steps")
+    page.locator("#disconnect").click()
+    expect(page.locator("#jobs-list tr")).to_have_count(0)
+    expect(page.locator("#jobs-result")).to_be_empty()

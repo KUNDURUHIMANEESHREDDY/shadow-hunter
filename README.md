@@ -163,9 +163,9 @@ Run the non-browser suite in the isolated development environment:
 For opt-in live model and browser testing, start Ollama, ensure the required model is installed, install Playwright and have Microsoft Edge available:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install playwright
+.\.venv\Scripts\python.exe -m pip install playwright pytest-playwright
 $env:RUN_LOCAL_QWEN_E2E = "1"
-.\.venv\Scripts\python.exe -m pytest -q tests/e2e/test_local_runtime_live.py
+.\.venv\Scripts\python.exe -m pytest -q tests/e2e/test_local_runtime_live.py --browser-channel msedge
 .\.venv\Scripts\python.exe -m pytest -q tests/test_local_runtime.py::test_live_model_cancellation_checkpoint
 Remove-Item Env:RUN_LOCAL_QWEN_E2E
 ```
@@ -187,7 +187,7 @@ See [sponsor integrations](docs/sponsor-integrations.md), [keyless authenticatio
 
 The prototype currently supports one bounded customer-support workload. The local planner admits two concurrent planning sessions and two waiting requests, with a five-second queue wait and a 45-second planning budget. Eight interactive workflow lifetimes may be admitted at once. A separate durable SQLite job queue accepts explicitly selected read capabilities and supports up to four independent dispatched jobs. The dependency ledger validates the entire allowlisted graph and exposes ready nodes; the support workload retains serial dependent reads and gateway verification. Streamed inference cancellation closes its HTTP request without terminating the shared Ollama process. Two concurrent live requests returned correct plans in 6.156 seconds; this does not prove parallel compute inside Ollama. The durable queue stores job identity, owner, registered capability, order identifier, state, lease and trace metadata only. Authenticated dispatch claims queued jobs transactionally, and expired leases are marked interrupted rather than silently replayed. The workspace supports queue, cancel queued jobs and dispatch a batch of up to four. Broader domain adapters and automatic dispatch without a fresh authenticated request are not implemented.
 
-Further work includes broader approved support coverage, additional capability adapters, verified Ollama compute cancellation and parallelism, repeatable live-model reliability measurements, latest-patch full regression and browser testing, and independent production verification. No production-ready deployment or verified public demo is claimed.
+Further work includes broader approved support coverage, additional capability adapters, deployment of a two-slot Ollama configuration, repeatable live-model reliability measurements, latest-patch full regression and browser testing, and independent production verification. No production-ready deployment or verified public demo is claimed.
 
 ## Repository guide
 
