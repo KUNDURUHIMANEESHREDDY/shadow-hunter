@@ -612,3 +612,69 @@ def test_authenticated_cancellation_http_boundary(monkeypatch, runtime):
     assert gateway.store.list_local_tasks(principal)[0]["status"] == "interrupted"
     assert not gateway.store.get_trace_events(trace)
     assert TestClient(app).post(path, headers=owner).status_code == 404
+
+
+@pytest.mark.skipif(__import__("os").environ.get("RUN_LOCAL_QWEN_E2E") != "1",
+                    reason="Explicit local Qwen opt-in")
+def test_live_model_cancellation_checkpoint(monkeypatch, runtime):
+    """Exercise real local inference, then cancel before review or business reads.
+
+    The synchronization gate intentionally controls the return from inference.
+    This is not a test of forced termination of the Ollama request.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from fastapi.testclient import TestClient
+    from shadow_hunter.auth import TokenAuthenticator
+    from shadow_hunter.api import create_app
+
+    assert rt.model_readiness()["ready"]
+    gateway, principal = runtime
+    monkeypatch.setenv("SHADOW_HUNTER_AUTH_MODE", "local")
+    monkeypatch.setenv("SHADOW_HUNTER_LOCAL_READONLY_ENABLED", "true")
+    monkeypatch.delenv("AWS_LAMBDA_FUNCTION_NAME", raising=False)
+    auth = TokenAuthenticator(customer_tokens={
+        "local-owner": {"subject_id": principal.subject_id, "tenant_id": principal.tenant_id,
+                        "customer_id": principal.customer_id},
+    }, operator_tokens={})
+    app = create_app(store=gateway.store, authenticator=auth)
+    classified, release = Event(), Event()
+    original = rt._classify
+    outcomes = []
+
+    def synchronized_classify(prompt, *, review, deadline):
+        outcome = original(prompt, review=review, deadline=deadline)
+        outcomes.append((review, outcome))
+        if not review:
+            classified.set()
+            if not release.wait(timeout=10):
+                raise RuntimeError("Test synchronization timed out")
+        return outcome
+
+    monkeypatch.setattr(rt, "_classify", synchronized_classify)
+    headers = {"Authorization": "Bearer local-owner"}
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(TestClient(app).post, "/v1/agent/local-readonly/stream",
+                             headers=headers, json={
+                                 "prompt": "Show my order details and check refund eligibility.",
+                                 "order_id": "sample-order"})
+        try:
+            assert classified.wait(timeout=45), "Live proposal did not return"
+            trace = gateway.store.list_local_tasks(principal)[0]["trace_id"]
+            response = TestClient(app).post("/v1/agent/local-readonly/cancel/" + trace,
+                                            headers=headers)
+            assert response.status_code == 200
+            assert response.json()["status"] == "cancellation_requested"
+        finally:
+            release.set()
+        result = future.result(timeout=15)
+    import json
+    events = [json.loads(line) for line in result.text.splitlines()]
+    assert outcomes == [(False, "both")]
+    assert events[-1]["type"] == "error" and events[-1]["status"] == "interrupted"
+    assert not any(e["type"] == "result" for e in events)
+    assert not gateway.store.get_trace_events(trace)
+    row = gateway.store.list_local_tasks(principal)[0]
+    assert row["status"] == "interrupted" and row["verified_steps"] == 0
+    print("LIVE QWEN: proposal returned; cancellation prevented review and tool invocation",
+          flush=True)
