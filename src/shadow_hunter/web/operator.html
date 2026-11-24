@@ -39,12 +39,33 @@
     button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #7597ec;outline-offset:2px}
     .security-pulse .grid{grid-template-columns:repeat(4,minmax(0,1fr));margin-top:16px;margin-bottom:0}
     @media(max-width:850px){.grid,.security-pulse .grid{grid-template-columns:repeat(2,1fr)}header{align-items:flex-start;flex-direction:column}.auth{width:100%;flex-wrap:wrap}.auth input{flex:1;width:auto}.settings-grid{grid-template-columns:1fr}}
-  </style>
+  
+    :root{color-scheme:dark;color:#eef3f8;background:#0b1017}
+    body{background:#0b1017} .shell{max-width:1440px;padding:28px 32px 70px}
+    header{padding:0 0 24px;border-bottom:1px solid #263341;align-items:center}
+    header h1{font-size:28px;font-weight:680;letter-spacing:-1px}
+    .brandline{display:flex;gap:12px;align-items:center}.opmark{display:grid;place-items:center;width:44px;height:44px;border:1px solid #31544e;background:#132b29;border-radius:12px;color:#72e1bf}
+    .toplinks{display:flex;gap:12px;align-items:center;margin-top:9px}.toplinks a{color:#72e1bf;text-decoration:none;font-size:12px;font-weight:600}.toplinks a:hover{text-decoration:underline}
+    p,.muted,.metric span,.setting-status,.security-note,.audit-controls label{color:#a1afbe}
+    .metric,.panel,.setting-card{background:#111923;border:1px solid #253241;border-radius:14px;padding:20px}
+    .metric{background:#151f2b}.metric strong{font-size:30px;letter-spacing:-1px;color:#eef3f8}
+    .panel h2{font-size:18px;font-weight:650;letter-spacing:-.4px}.panel{margin-top:20px}
+    .setting-card{background:#0e1620}.setting-card h3{font-size:14px}
+    input,select,button{border-color:#304050;border-radius:8px;background:#0c131c;color:#eef3f8}input::placeholder{color:#8291a3}
+    button{background:#72e1bf;color:#0d2924;border-color:#72e1bf;font-weight:650}button:not(:disabled):hover{background:#98f0d5}button.secondary{color:#eef3f8;background:#151f2b;border-color:#314051}button.secondary:not(:disabled):hover{background:#203041}
+    th{background:#0d151f;color:#a1afbe}td,th{border-bottom-color:#253241}td{color:#d3dee7}tbody tr:hover{background:#182330}
+    .pill{background:#283547;color:#d2dfea}.ALLOW,.APPROVED,.EXECUTED{background:#163b2e;color:#9bf0c5}.DENY,.REJECTED,.EXPIRED{background:#3d222a;color:#ffc1c8}.ESCALATE,.PENDING{background:#3d3020;color:#ffe0a2}
+    #message{color:#b5c3d0!important}.banner{background:#111923;border:1px solid #253241;border-radius:9px;padding:10px 13px}
+    button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid #72e1bf;outline-offset:3px}
+    .grid{gap:14px}.setting-form{gap:8px}.table-wrap{border-radius:8px;border:1px solid #253241}
+    @media(max-width:850px){.shell{padding:20px 16px 50px}.panel,.metric,.setting-card{padding:16px}}
+
+</style>
 </head>
 <body>
 <div class="shell">
   <header>
-    <div><h1>Shadow Hunter</h1><p>Agent governance · approvals · audit evidence</p></div>
+    <div><div class="brandline"><span class="opmark"><svg width="29" height="29" viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M16 3 28 8v8c0 6-5 11-12 14C9 27 4 22 4 16V8L16 3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="m10 16 4 4 8-9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span><div><h1>Shadow Hunter</h1><p>Operator console · governance and evidence</p></div></div><div class="toplinks"><a href="local-workspace">AI workspace</a><a href="#security-pulse">Security pulse</a><a href="#integration-settings">Integrations</a><a href="#agent-evaluation">Evaluation lab</a></div></div>
     <div class="auth">
       <button id="refresh-console" class="secondary" type="button" hidden>Refresh</button>
       <div id="local-auth">
