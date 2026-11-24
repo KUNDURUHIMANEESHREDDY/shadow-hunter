@@ -475,3 +475,82 @@ def test_planner_failure_releases_resources(monkeypatch):
     assert lock.acquire(False)
     lock.release()
     assert slots.acquire(False) and slots.acquire(False)
+
+
+def test_stop_before_first_read_persists_interruption(monkeypatch, runtime):
+    from threading import Event
+    gateway, principal = runtime
+    signal = Event()
+    planner = Mock(return_value="both")
+    monkeypatch.setattr(rt, "plan_readonly_task", planner)
+    stream = rt.tracked_readonly_task(gateway, principal, prompt="show order",
+                                      order_id="sample-order", cancellation=signal)
+    started = next(stream)
+    signal.set()
+    with pytest.raises(rt.TaskInterrupted):
+        next(stream)
+    planner.assert_not_called()
+    assert not gateway.store.get_trace_events(started["trace_id"])
+    row = gateway.store.list_local_tasks(principal)[0]
+    assert row["status"] == "interrupted" and row["verified_steps"] == 0
+
+
+def test_stop_between_planning_calls_releases_admission(monkeypatch):
+    from threading import Event, BoundedSemaphore, Lock
+    signal = Event()
+    slots, lock = BoundedSemaphore(2), Lock()
+    monkeypatch.setattr(rt, "_ADMISSION", slots)
+    monkeypatch.setattr(rt, "_LOCK", lock)
+    def classify(*args, **kwargs):
+        signal.set()
+        return "both"
+    planner = Mock(side_effect=classify)
+    monkeypatch.setattr(rt, "_classify", planner)
+    with pytest.raises(rt.TaskInterrupted):
+        rt.plan_readonly_task("show and check", cancellation=signal)
+    assert planner.call_count == 1
+    assert lock.acquire(False)
+    lock.release()
+    assert slots.acquire(False) and slots.acquire(False)
+
+
+def test_stop_after_first_verified_read_prevents_dependent_read(monkeypatch, runtime):
+    from threading import Event
+    gateway, principal = runtime
+    signal = Event()
+    monkeypatch.setattr(rt, "plan_readonly_task", Mock(return_value="both"))
+    invoke = Mock(wraps=gateway.invoke)
+    monkeypatch.setattr(gateway, "invoke", invoke)
+    stream = rt.tracked_readonly_task(gateway, principal, prompt="show and check",
+                                      order_id="sample-order", cancellation=signal)
+    for event in stream:
+        if event.get("stage") == "tool" and event.get("status") == "verified":
+            break
+    signal.set()
+    with pytest.raises(rt.TaskInterrupted):
+        next(stream)
+    assert invoke.call_count == 1
+    row = gateway.store.list_local_tasks(principal)[0]
+    assert row["status"] == "interrupted" and row["verified_steps"] == 1
+
+
+def test_stop_registry_is_account_scoped_and_bounded(runtime):
+    from threading import Event
+    _, principal = runtime
+    registry = rt.SupportCancellationRegistry()
+    signals = [Event() for _ in range(9)]
+    for i in range(8):
+        registry.register(principal, str(i), signals[i])
+    with pytest.raises(rt.PlannerBusy):
+        registry.register(principal, "8", signals[8])
+    foreign = Principal(principal.subject_id, principal.tenant_id, "foreign", True)
+    assert not registry.request(foreign, "0")
+    assert not registry.request(principal, "missing")
+    assert not signals[0].is_set()
+    assert registry.request(principal, "0")
+    assert signals[0].is_set()
+    registry.remove("0", signals[8])
+    assert registry.request(principal, "0")
+    registry.remove("0", signals[0])
+    assert not registry.request(principal, "0")
+    registry.register(principal, "8", signals[8])

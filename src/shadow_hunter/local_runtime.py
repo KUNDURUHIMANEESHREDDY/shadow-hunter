@@ -42,7 +42,53 @@ class PlannerBusy(LocalRuntimeError):
     pass
 
 
+class TaskInterrupted(LocalRuntimeError):
+    pass
+
+
+def _checkpoint(cancellation: threading.Event | None) -> None:
+    if cancellation is not None and cancellation.is_set():
+        raise TaskInterrupted("Local task interrupted")
+
+
+class SupportCancellationRegistry:
+    """Bounded process-local stop signals for authenticated streamed support tasks."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._active = {}
+
+    @staticmethod
+    def _owner(principal: Principal):
+        return (principal.subject_id, principal.tenant_id, principal.customer_id)
+
+    def register(self, principal: Principal, trace: str, signal: threading.Event) -> None:
+        if principal.authenticated is not True:
+            raise LocalRuntimeError("Authenticated principal required")
+        with self._lock:
+            if len(self._active) >= 8 or trace in self._active:
+                raise PlannerBusy("Local task registry full")
+            self._active[trace] = (self._owner(principal), signal)
+
+    def request(self, principal: Principal, trace: str) -> bool:
+        with self._lock:
+            entry = self._active.get(trace)
+            if principal.authenticated is not True or entry is None or entry[0] != self._owner(principal):
+                return False
+            entry[1].set()
+            return True
+
+    def remove(self, trace: str, signal: threading.Event) -> None:
+        with self._lock:
+            entry = self._active.get(trace)
+            if entry is not None and entry[1] is signal:
+                del self._active[trace]
+
+
+
 def public_runtime_error(exc: Exception) -> str:
+    if isinstance(exc, TaskInterrupted):
+        return "Task interrupted at a cancellation checkpoint."
     if isinstance(exc, ModelUnavailable):
         return "Local model unavailable. Check Ollama and the installed Qwen model."
     if isinstance(exc, PlannerBusy):
@@ -196,7 +242,8 @@ def _explicit_change_request(prompt: str) -> bool:
     ))
 
 
-def plan_readonly_task(prompt: str) -> str:
+def plan_readonly_task(prompt: str, *, cancellation: threading.Event | None = None) -> str:
+    _checkpoint(cancellation)
     if _explicit_change_request(prompt):
         return "unsupported"
     if not _ADMISSION.acquire(blocking=False):
@@ -206,9 +253,12 @@ def plan_readonly_task(prompt: str) -> str:
         acquired = _LOCK.acquire(timeout=QUEUE_TIMEOUT)
         if not acquired:
             raise PlannerBusy("Local planning queue timeout")
+        _checkpoint(cancellation)
         deadline = time.monotonic() + PLAN_TIMEOUT
         proposal = _classify(prompt, review=False, deadline=deadline)
+        _checkpoint(cancellation)
         review = _classify(prompt, review=True, deadline=deadline)
+        _checkpoint(cancellation)
         # Agreement is a quality check, never authorization or proof of intent.
         if proposal != review:
             return "clarify"
@@ -272,7 +322,8 @@ def _verify_step(gateway: ToolGateway, principal: Principal, *, trace: str,
         raise LocalRuntimeError("Inconsistent eligibility result")
 
 def iter_readonly_task(gateway: ToolGateway, principal: Principal, *,
-                       prompt: str, order_id: str) -> Iterator[dict[str, Any]]:
+                       prompt: str, order_id: str,
+                       cancellation: threading.Event | None = None) -> Iterator[dict[str, Any]]:
     if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 1000:
         raise ValueError("Prompt must contain 1-1000 characters")
     if not isinstance(order_id, str) or not order_id.strip() or len(order_id) > 128 or order_id.strip() != order_id:
@@ -281,7 +332,10 @@ def iter_readonly_task(gateway: ToolGateway, principal: Principal, *,
         raise LocalRuntimeError("Authenticated principal required")
     trace = str(uuid4())
     yield {"type": "progress", "stage": "planning", "status": "started", "trace_id": trace}
-    intent = plan_readonly_task(prompt)
+    _checkpoint(cancellation)
+    intent = (plan_readonly_task(prompt) if cancellation is None
+              else plan_readonly_task(prompt, cancellation=cancellation))
+    _checkpoint(cancellation)
     if not isinstance(intent, str) or (intent not in PLANS and intent != "clarify"):
         raise LocalRuntimeError("Invalid plan")
     workflow = support_workflow(intent)
@@ -321,6 +375,7 @@ def iter_readonly_task(gateway: ToolGateway, principal: Principal, *,
                 "plan": plan, "workflow": workflow, "steps": steps, "timeline": timeline,
                 "verified_steps": len(steps)}
     yield {"type": "progress", "stage": "planning", "status": "reviewed", "plan": plan, "workflow": workflow, "trace_id": trace}
+    _checkpoint(cancellation)
     if intent in ("unsupported", "clarify"):
         timeline.append({"stage": "planning", "status": intent})
         yield {"type": "result", "result": response(intent)}
@@ -330,11 +385,13 @@ def iter_readonly_task(gateway: ToolGateway, principal: Principal, *,
     for attempt in range(2):
         verified = set()
         for node in workflow:
+            _checkpoint(cancellation)
             if not set(node["depends_on"]).issubset(verified):
                 raise LocalRuntimeError("Unverified workflow dependency")
             tool = node["id"]
             request_id = str(uuid4())
             yield {"type": "progress", "stage": "tool", "status": "started", "tool": tool, "trace_id": trace}
+            _checkpoint(cancellation)
             result = gateway.invoke(
                 principal=principal, tool_name=tool, arguments={"order_id": order_id},
                 request_id=request_id, trace_id=trace, agent_id=AGENT_ID,
@@ -344,6 +401,7 @@ def iter_readonly_task(gateway: ToolGateway, principal: Principal, *,
             steps.append({"tool": tool, "result": public_tool_result(result), "verified": True})
             timeline.append({"stage": "tool", "tool": tool, "status": "verified"})
             yield {"type": "progress", "stage": "tool", "status": "verified", "tool": tool, "trace_id": trace}
+            _checkpoint(cancellation)
             if result["decision"] != "ALLOW":
                 timeline.append({"stage": "completion", "status": "denied"})
                 yield {"type": "result", "result": response("denied")}
@@ -364,6 +422,7 @@ def iter_readonly_task(gateway: ToolGateway, principal: Principal, *,
         steps.clear()
         timeline.append({"stage": "recovery", "status": "retrying"})
         yield {"type": "progress", "stage": "recovery", "status": "retrying", "trace_id": trace}
+    _checkpoint(cancellation)
     timeline.append({"stage": "completion", "status": "verified"})
     yield {"type": "result", "result": response("completed")}
 
@@ -377,13 +436,15 @@ def run_readonly_task(gateway: ToolGateway, principal: Principal, *,
 
 
 def tracked_readonly_task(gateway: ToolGateway, principal: Principal, *,
-                          prompt: str, order_id: str) -> Iterator[dict[str, Any]]:
+                          prompt: str, order_id: str,
+                          cancellation: threading.Event | None = None) -> Iterator[dict[str, Any]]:
     """Persist only minimal account-scoped task metadata, never prompt/results."""
     trace = None
     steps = 0
     finalized = False
     try:
-        for event in iter_readonly_task(gateway, principal, prompt=prompt, order_id=order_id):
+        for event in iter_readonly_task(gateway, principal, prompt=prompt, order_id=order_id,
+                                        cancellation=cancellation):
             if trace is None:
                 new_trace = event["trace_id"]
                 gateway.store.begin_local_task(principal, new_trace)
@@ -398,6 +459,9 @@ def tracked_readonly_task(gateway: ToolGateway, principal: Principal, *,
                 gateway.store.finish_local_task(principal, trace, result["status"], result["verified_steps"])
                 finalized = True
             yield event
+    except TaskInterrupted:
+        # The finally block records the interruption and verified step count.
+        raise
     except Exception:
         if trace is not None and not finalized:
             gateway.store.finish_local_task(principal, trace, "failed", steps)

@@ -518,20 +518,44 @@ def create_app(
         except (LocalRuntimeError, GatewayError, StoreError) as exc:
             raise HTTPException(status_code=503, detail=public_runtime_error(exc)) from None
 
+    from .local_runtime import SupportCancellationRegistry
+    local_cancellations = SupportCancellationRegistry()
+
+    @app.post("/v1/agent/local-readonly/cancel/{trace_id}")
+    def cancel_local_task(trace_id: str, authorization: str | None = Header(default=None)):
+        principal = gateway_tool_principal(authorization)
+        require_local_runtime()
+        if not local_cancellations.request(principal, trace_id):
+            raise HTTPException(status_code=404, detail="Active task not available")
+        return {"status": "cancellation_requested"}
+
     @app.post("/v1/agent/local-readonly/stream")
     def local_readonly_stream(
         body: dict[str, Any] = Body(...),
         authorization: str | None = Header(default=None),
     ):
         import json
-        from .local_runtime import LocalRuntimeError, public_runtime_error, tracked_readonly_task
+        import threading
+        from contextlib import closing
+        from .local_runtime import LocalRuntimeError, TaskInterrupted, public_runtime_error, tracked_readonly_task
         principal, prompt, order_id = local_task_inputs(body, authorization)
         def events():
+            signal = threading.Event()
+            trace = None
             try:
-                for event in tracked_readonly_task(gateway, principal, prompt=prompt, order_id=order_id):
-                    yield json.dumps(event, ensure_ascii=True) + "\n"
+                with closing(tracked_readonly_task(gateway, principal, prompt=prompt,
+                                                   order_id=order_id, cancellation=signal)) as task:
+                    for event in task:
+                        if trace is None:
+                            local_cancellations.register(principal, event["trace_id"], signal)
+                            trace = event["trace_id"]
+                        yield json.dumps(event, ensure_ascii=True) + "\n"
             except (LocalRuntimeError, GatewayError, StoreError, ValueError) as exc:
-                yield json.dumps({"type": "error", "status": "failed", "message": public_runtime_error(exc)}) + "\n"
+                yield json.dumps({"type": "error", "status": "interrupted" if isinstance(exc, TaskInterrupted) else "failed",
+                                  "message": public_runtime_error(exc)}) + "\n"
+            finally:
+                if trace is not None:
+                    local_cancellations.remove(trace, signal)
         return StreamingResponse(events(), media_type="application/x-ndjson",
                                  headers={"X-Accel-Buffering": "no", "Cache-Control": "no-store"})
 
