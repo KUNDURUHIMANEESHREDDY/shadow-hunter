@@ -533,19 +533,38 @@ def create_app(
                           authorization: str | None = Header(default=None)):
         principal, scheduler = local_scheduler(authorization)
         from .scheduler import QueueBusy
-        if not {"capability","order_id"} <= set(body) or set(body)-{"capability","order_id","delay_seconds"}:
+        if not {"capability","order_id"} <= set(body) or set(body)-{"capability","order_id","delay_seconds","repeat_interval","run_count"}:
             raise HTTPException(status_code=422,detail="Invalid job")
         try:
             delay=body.get("delay_seconds")
             if "delay_seconds" in body and (delay is None or not auto_jobs_enabled()):
                 raise ValueError("Automatic scheduling unavailable")
             return {"job_id": scheduler.enqueue(principal,body["capability"],body["order_id"],
-                                                delay_seconds=delay),
+                                                delay_seconds=delay,repeat_interval=body.get("repeat_interval"),
+                                                run_count=body.get("run_count")),
                     "status":"queued"}
         except ValueError:
             raise HTTPException(status_code=422,detail="Invalid job") from None
         except QueueBusy:
             raise HTTPException(status_code=429,detail="Job queue busy") from None
+
+    @app.post("/v1/agent/local-workflows")
+    def run_local_workflow(body: dict[str, Any] = Body(...),
+                           authorization: str | None = Header(default=None)):
+        principal = gateway_tool_principal(authorization)
+        require_local_runtime()
+        from .scheduler import execute_graph
+        from .local_runtime import _WORKFLOW_SLOTS
+        if set(body)!={"nodes"}:
+            raise HTTPException(status_code=422,detail="Invalid workflow")
+        if not _WORKFLOW_SLOTS.acquire(blocking=False):
+            raise HTTPException(status_code=429,detail="Workflow capacity reached")
+        try:
+            return execute_graph(principal,gateway,body["nodes"])
+        except ValueError:
+            raise HTTPException(status_code=422,detail="Invalid workflow") from None
+        finally:
+            _WORKFLOW_SLOTS.release()
 
     @app.post("/v1/agent/local-jobs/run-next")
     def run_next_local_job(authorization: str | None = Header(default=None)):

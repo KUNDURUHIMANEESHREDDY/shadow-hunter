@@ -237,3 +237,16 @@ def test_automatic_utility_job_browser(page,local_runtime_enabled,local_server):
     expect(page.locator("#jobs-list")).to_contain_text("completed")
     page.locator("#disconnect").click()
     expect(page.locator("#numeric-input")).to_have_value("")
+
+
+def test_workflow_builder_browser(page,local_runtime_enabled,local_server):
+    from playwright.sync_api import expect
+    page.goto(local_server+"/local-workspace")
+    page.locator("#token").fill(CUSTOMER_TOKEN)
+    page.locator("#connect").click()
+    expect(page.locator("#status")).to_have_text("Connected to local account.")
+    page.locator("#workflow-example").click()
+    page.locator("#workflow-run").click()
+    expect(page.locator("#workflow-result")).to_contain_text('"value": "2000"')
+    page.locator("#disconnect").click()
+    expect(page.locator("#workflow-result")).to_be_empty()

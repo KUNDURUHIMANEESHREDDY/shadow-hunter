@@ -170,3 +170,66 @@ def test_unattended_worker_lifespan(context,monkeypatch):
         assert client.post(path,headers=headers,json={"capability":"numeric_summary","order_id":"1,2","delay_seconds":3601}).status_code==422
         monkeypatch.setenv("SHADOW_HUNTER_AUTO_JOBS_ENABLED","false")
         assert client.post(path,headers=headers,json={"capability":"numeric_summary","order_id":"1,2","delay_seconds":0}).status_code==422
+
+
+def test_recurring_jobs_bounded_and_persistent(context,monkeypatch):
+    from shadow_hunter import scheduler as module
+    store,a,b,gateway=context
+    now=100000
+    monkeypatch.setattr(module.time,"time",lambda:now)
+    queue=DurableScheduler(store)
+    job=queue.enqueue(a,"numeric_summary","1,2",delay_seconds=0,repeat_interval=60,run_count=3)
+    for index in range(3):
+        queue=DurableScheduler(SQLiteStore(store.database_path))
+        assert len(queue.dispatch_due(gateway,lambda owner:a))==1
+        row=queue.list(a)[0]
+        assert row["runs_completed"]==index+1
+        assert row["state"]==("queued" if index<2 else "completed")
+        assert queue.dispatch_due(gateway,lambda owner:a)==[]
+        now+=60
+    assert row["runs_remaining"]==0
+    with pytest.raises(ValueError):
+        queue.enqueue(a,"numeric_summary","1,2",delay_seconds=0,repeat_interval=1,run_count=3)
+
+
+def test_recurring_denial_stops(context):
+    store,a,b,gateway=context
+    queue=DurableScheduler(store)
+    queue.enqueue(b,"order_summary","owned",delay_seconds=0,repeat_interval=60,run_count=3)
+    assert queue.dispatch_due(gateway,lambda owner:b)[0]["status"]=="denied"
+    assert queue.list(b)[0]["state"]=="denied"
+
+
+def test_registry_conversion_and_external_allowlist(context,monkeypatch):
+    from shadow_hunter import scheduler as module
+    store,a,b,gateway=context
+    queue=DurableScheduler(store)
+    queue.enqueue(a,"unit_conversion","2:km_to_m")
+    assert queue.dispatch_next(a,gateway)["result"]["value"]=="2000"
+    with pytest.raises(ValueError):
+        queue.enqueue(a,"public_repo_metadata","https://example.com")
+    monkeypatch.setattr(module,"public_repo_metadata",lambda repo:{"status":"completed","repository":repo})
+    queue.enqueue(a,"public_repo_metadata","python/cpython")
+    assert queue.dispatch_next(a,gateway)["result"]["repository"]=="python/cpython"
+
+
+def test_graph_dependencies_and_validation(context,monkeypatch):
+    from shadow_hunter import scheduler as module
+    store,a,b,gateway=context
+    nodes=[
+        {"id":"a","capability":"order_summary","resource":"owned","depends_on":[]},
+        {"id":"b","capability":"numeric_summary","resource":"1,2","depends_on":[]},
+        {"id":"c","capability":"unit_conversion","resource":"2:km_to_m","depends_on":["a","b"]},
+    ]
+    result=module.execute_graph(a,gateway,nodes)
+    assert result["status"]=="completed"
+    assert result["nodes"]["c"]["value"]=="2000"
+    result=module.execute_graph(b,gateway,nodes)
+    assert result["nodes"]["a"]["status"]=="denied"
+    assert result["nodes"]["b"]["status"]=="completed"
+    assert result["nodes"]["c"]["status"]=="blocked"
+    monkeypatch.setattr(module,"execute_capability",lambda *args: pytest.fail("Invalid graph executed"))
+    with pytest.raises(ValueError):
+        module.execute_graph(a,gateway,[*nodes,{"id":"d","capability":"write","resource":"x","depends_on":[]}])
+    with pytest.raises(ValueError):
+        module.execute_graph(a,gateway,[{**nodes[0],"depends_on":["a"]}])

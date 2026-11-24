@@ -22,6 +22,8 @@ CAPABILITIES = MappingProxyType({
     "order_and_refund_review": "both",
     "model_readiness": None,
     "numeric_summary": None,
+    "public_repo_metadata": None,
+    "unit_conversion": None,
 })
 TERMINAL = ("completed", "denied", "failed", "interrupted", "cancelled")
 
@@ -42,7 +44,7 @@ class DurableScheduler:
                 claim TEXT, lease REAL, trace TEXT
             )""")
             columns = {row[1] for row in conn.execute("PRAGMA table_info(local_jobs)")}
-            for name in ("due", "expires"):
+            for name in ("due", "expires", "repeat_interval", "runs_remaining", "runs_completed"):
                 if name not in columns:
                     conn.execute("ALTER TABLE local_jobs ADD COLUMN " + name + " REAL")
             conn.execute("""CREATE INDEX IF NOT EXISTS local_jobs_owner
@@ -63,18 +65,23 @@ class DurableScheduler:
             WHERE state='queued' AND expires IS NOT NULL AND expires<=?""", (now, now))
 
     def enqueue(self, principal: Principal, capability: str, resource: str,
-                *, delay_seconds: int | None = None) -> str:
+                *, delay_seconds: int | None = None, repeat_interval: int | None = None,
+                run_count: int | None = None) -> str:
         owner = self.owner(principal)
         if (not isinstance(capability, str) or capability not in CAPABILITIES
                 or not isinstance(resource, str) or not resource.strip()
                 or resource != resource.strip() or len(resource)>128):
             raise ValueError("Invalid job")
-        if capability == "model_readiness" and resource != "local":
-            raise ValueError("Invalid fixed resource")
-        if capability == "numeric_summary":
-            numeric_values(resource)
+        validate_resource(capability,resource)
         if delay_seconds is not None and (type(delay_seconds) is not int or not 0 <= delay_seconds <= 3600):
             raise ValueError("Invalid schedule delay")
+        if repeat_interval is not None:
+            if (delay_seconds is None or type(repeat_interval) is not int
+                    or not 60 <= repeat_interval <= 86400 or type(run_count) is not int
+                    or not 2 <= run_count <= 20 or repeat_interval*(run_count-1)>7*86400):
+                raise ValueError("Invalid bounded recurrence")
+        elif run_count is not None:
+            raise ValueError("Repeat interval required")
         now, job = time.time(), str(uuid4())
         due = now + delay_seconds if delay_seconds is not None else None
         expires = due + 300 if due is not None else None
@@ -91,15 +98,15 @@ class DurableScheduler:
             if count>=1000 or active>=8:
                 raise QueueBusy("Job queue capacity reached")
             conn.execute("""INSERT INTO local_jobs
-                (job_id,subject,tenant,customer,capability,resource,state,created,updated,due,expires)
-                VALUES (?,?,?,?,?,?,'queued',?,?,?,?)""", (job,*owner,capability,resource,now,now,due,expires))
+                (job_id,subject,tenant,customer,capability,resource,state,created,updated,due,expires,repeat_interval,runs_remaining,runs_completed)
+                VALUES (?,?,?,?,?,?,'queued',?,?,?,?,?,?,0)""", (job,*owner,capability,resource,now,now,due,expires,repeat_interval,run_count))
         return job
 
     def list(self, principal: Principal) -> list[dict]:
         owner = self.owner(principal)
         with self.store._transaction() as conn:
             self._expire(conn,time.time())
-            rows = conn.execute("""SELECT job_id,capability,state,created,updated,trace,due,expires
+            rows = conn.execute("""SELECT job_id,capability,state,created,updated,trace,due,expires,repeat_interval,runs_remaining,runs_completed
                 FROM local_jobs WHERE subject=? AND tenant=? AND customer=?
                 ORDER BY created DESC LIMIT 100""",owner).fetchall()
         return [dict(row) for row in rows]
@@ -134,9 +141,22 @@ class DurableScheduler:
         now = time.time()
         with self.store._transaction() as conn:
             self._expire(conn,now)
-            return conn.execute("""UPDATE local_jobs SET state=?,trace=?,updated=?,claim=NULL,lease=NULL
-                WHERE job_id=? AND subject=? AND tenant=? AND customer=?
-                AND state='running' AND claim=?""",(status,trace,now,job,*owner,claim)).rowcount == 1
+            row=conn.execute("""SELECT due,repeat_interval,runs_remaining FROM local_jobs
+                WHERE job_id=? AND subject=? AND tenant=? AND customer=? AND state='running' AND claim=?""",
+                (job,*owner,claim)).fetchone()
+            if row is None:
+                return False
+            remaining=int(row["runs_remaining"] or 0)
+            if status=="completed" and row["repeat_interval"] and remaining>1:
+                due=max(now,row["due"])+row["repeat_interval"]
+                conn.execute("""UPDATE local_jobs SET state='queued',trace=?,updated=?,claim=NULL,lease=NULL,
+                    due=?,expires=?,runs_remaining=?,runs_completed=COALESCE(runs_completed,0)+1 WHERE job_id=?""",
+                    (trace,now,due,due+300,remaining-1,job))
+            else:
+                conn.execute("""UPDATE local_jobs SET state=?,trace=?,updated=?,claim=NULL,lease=NULL,
+                    runs_remaining=?,runs_completed=COALESCE(runs_completed,0)+? WHERE job_id=?""",
+                    (status,trace,now,max(0,remaining-1),int(status=="completed"),job))
+            return True
 
     def dispatch_next(self, principal: Principal, gateway):
         entry = self.claim_next(principal)
@@ -150,20 +170,9 @@ class DurableScheduler:
         status = "failed"
         result = None
         try:
-            # Registry selection cannot grant new permissions or accept arbitrary tool names.
-            intent = CAPABILITIES[job["capability"]]
-            if intent is None:
-                # Pure adapters cannot access business stores, invoke tools, or choose URLs.
-                result = run_utility(job["capability"], job["resource"])
-                status = result["status"]
-            else:
-                for event in rt._iter_readonly_task(gateway,principal,prompt="Approved scheduled read",
-                                                   order_id=job["resource"],approved_intent=intent):
-                    if event["type"] == "progress":
-                        trace = event["trace_id"]
-                    elif event["type"] == "result":
-                        result = event["result"]
-                        status = result["status"]
+            result = execute_capability(principal,gateway,job["capability"],job["resource"])
+            trace = result.get("trace_id")
+            status = result["status"]
             if status not in ("completed","denied"):
                 status = "failed"
         except Exception:
@@ -240,4 +249,107 @@ def run_utility(capability: str, resource: str):
                 "mean":str(sum(values)/len(values))}
     if capability=="model_readiness" and resource=="local":
         return {"status":"completed","readiness":rt.model_readiness()}
+    if capability=="unit_conversion":
+        value,unit=resource.split(":")
+        factors={"km_to_m":Decimal(1000),"m_to_km":Decimal("0.001"),"kg_to_g":Decimal(1000),"g_to_kg":Decimal("0.001")}
+        return {"status":"completed","value":str(Decimal(value)*factors[unit]),"conversion":unit}
+    if capability=="public_repo_metadata":
+        return public_repo_metadata(resource)
     raise ValueError("Unknown utility capability")
+
+
+PUBLIC_REPOSITORIES=frozenset({"python/cpython","pallets/flask","fastapi/fastapi"})
+CONVERSIONS=frozenset({"km_to_m","m_to_km","kg_to_g","g_to_kg"})
+
+
+def validate_resource(capability,resource):
+    if not isinstance(capability,str) or capability not in CAPABILITIES or not isinstance(resource,str) or not resource.strip() or resource.strip()!=resource or len(resource)>128:
+        raise ValueError("Invalid capability input")
+    if capability=="model_readiness" and resource!="local":
+        raise ValueError("Invalid fixed resource")
+    if capability=="numeric_summary":
+        numeric_values(resource)
+    if capability=="public_repo_metadata" and resource not in PUBLIC_REPOSITORIES:
+        raise ValueError("Repository not approved")
+    if capability=="unit_conversion":
+        parts=resource.split(":")
+        if len(parts)!=2 or parts[1] not in CONVERSIONS or len(numeric_values(parts[0]))!=1:
+            raise ValueError("Invalid conversion")
+
+
+def public_repo_metadata(resource):
+    import json
+    import httpx2
+    if resource not in PUBLIC_REPOSITORIES:
+        raise ValueError("Repository not approved")
+    # Fixed HTTPS origin, exact public allowlist, no credentials or redirects.
+    with httpx2.Client(trust_env=False,follow_redirects=False,timeout=5) as client:
+        with client.stream("GET","https://api.github.com/repos/"+resource,
+                           headers={"Accept":"application/vnd.github+json","User-Agent":"Shadow-Hunter"}) as response:
+            response.raise_for_status()
+            data=bytearray()
+            for chunk in response.iter_bytes():
+                data.extend(chunk[:65537-len(data)])
+                if len(data)>65536:
+                    raise ValueError("Oversized response")
+    payload=json.loads(data)
+    if payload.get("full_name")!=resource or payload.get("private") is not False:
+        raise ValueError("Unverified repository")
+    return {"status":"completed","repository":resource,"stars":int(payload["stargazers_count"]),
+            "forks":int(payload["forks_count"]),"default_branch":str(payload["default_branch"])[:128]}
+
+
+def execute_capability(principal,gateway,capability,resource):
+    DurableScheduler.owner(principal)
+    validate_resource(capability,resource)
+    intent=CAPABILITIES[capability]
+    if intent is None:
+        return run_utility(capability,resource)
+    for event in rt._iter_readonly_task(gateway,principal,prompt="Approved workflow read",
+                                       order_id=resource,approved_intent=intent):
+        if event["type"]=="result":
+            return event["result"]
+    raise RuntimeError("No verified result")
+
+
+def execute_graph(principal,gateway,nodes):
+    """Execute explicit bounded DAGs; dependencies never override authorization."""
+    from concurrent.futures import ThreadPoolExecutor
+    from .orchestration import DependencyLedger
+    DurableScheduler.owner(principal)
+    if not isinstance(nodes,list) or not 1<=len(nodes)<=8:
+        raise ValueError("Invalid graph size")
+    by_id={}
+    for node in nodes:
+        if not isinstance(node,dict) or set(node)!={"id","capability","resource","depends_on"}:
+            raise ValueError("Invalid node")
+        name=node["id"]
+        if not isinstance(name,str) or not re.fullmatch(r"[a-zA-Z0-9_-]{1,32}",name) or name in by_id:
+            raise ValueError("Invalid node identity")
+        validate_resource(node["capability"],node["resource"])
+        by_id[name]=node
+    ledger=DependencyLedger.compile([{"id":n["id"],"depends_on":n["depends_on"]} for n in nodes],
+                                    allowed=frozenset(by_id),max_nodes=8)
+    results={}
+    def run(name):
+        n=by_id[name]
+        try:
+            return execute_capability(principal,gateway,n["capability"],n["resource"])
+        except Exception:
+            return {"status":"failed"}
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        while True:
+            ready=[name for name in ledger.ready() if name not in results]
+            if not ready:
+                break
+            # All graph nodes are validated before any execution.
+            futures={name:pool.submit(run,name) for name in ready[:2]}
+            for name,future in futures.items():
+                result=future.result()
+                results[name]=result
+                if result.get("status")=="completed":
+                    ledger.mark_verified(name)
+    for name in by_id:
+        results.setdefault(name,{"status":"blocked"})
+    return {"status":"completed" if all(r.get("status")=="completed" for r in results.values()) else "incomplete",
+            "nodes":results}
