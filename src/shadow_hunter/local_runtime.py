@@ -30,6 +30,20 @@ class LocalRuntimeError(RuntimeError):
 class InvalidPlan(LocalRuntimeError):
     pass
 
+def _proposal_intent(answer: Any) -> str:
+    """Translate only validated support capabilities into the legacy intent contract."""
+    if not isinstance(answer, dict) or set(answer) != {"reads"}:
+        raise ValueError("Invalid read proposal")
+    reads = answer["reads"]
+    if not isinstance(reads, list) or len(reads) > 2:
+        raise ValueError("Invalid read list")
+    if any(type(item) is not str or item not in {"order_details", "refund_eligibility"} for item in reads):
+        raise ValueError("Unknown read capability")
+    if len(set(reads)) != len(reads):
+        raise ValueError("Duplicate read capability")
+    return "both" if len(reads) == 2 else reads[0] if reads else "unsupported"
+
+
 def _classify(prompt: str, *, review: bool, deadline: float) -> str:
     schema = {
         "type": "object",
@@ -53,6 +67,21 @@ def _classify(prompt: str, *, review: bool, deadline: float) -> str:
         "Explain a math concept -> unsupported. Write a story -> unsupported. "
         "Submit a refund -> unsupported. Return JSON only."
     )
+    if not review:
+        schema = {
+            "type": "object",
+            "properties": {"reads": {"type": "array", "maxItems": 2,
+                                      "uniqueItems": True, "items": {"type": "string",
+                                      "enum": ["order_details", "refund_eligibility"]}}},
+            "required": ["reads"],
+            "additionalProperties": False,
+        }
+        instructions += (
+            " For this proposal, represent the requested capabilities as a reads array "
+            "instead of an intent string. For both use both names; for unsupported use an "
+            "empty array. Never include arguments, identifiers or write operations. "
+            'Output only a JSON object with key reads, e.g. {"reads":["order_details"]}.'
+        )
     if review:
         instructions += (
             " As the coverage reviewer, choose both when the request combines two "
@@ -67,11 +96,12 @@ def _classify(prompt: str, *, review: bool, deadline: float) -> str:
             "model": MODEL, "stream": False, "think": False, "format": schema,
             "messages": [
                 {"role": "system", "content": instructions + (
-                    " Output exactly one JSON intent from the allowed enum." if attempt else ""
+                    (" Output exactly one JSON intent from the allowed enum." if review else
+                     " Output exactly one JSON reads array object from the allowed capabilities.") if attempt else ""
                 )},
                 {"role": "user", "content": prompt},
             ],
-            "options": {"temperature": 0, "num_ctx": 2048, "num_predict": 32},
+            "options": {"temperature": 0, "num_ctx": 2048, "num_predict": 64},
         }
         request = urllib.request.Request(
             "http://127.0.0.1:11434/api/chat",
@@ -92,6 +122,8 @@ def _classify(prompt: str, *, review: bool, deadline: float) -> str:
             if not isinstance(result, dict) or result.get("model") != MODEL or result.get("done") is not True:
                 raise ValueError("Unexpected model response")
             answer = json.loads(result["message"]["content"])
+            if not review:
+                return _proposal_intent(answer)
             if not isinstance(answer, dict) or set(answer) != {"intent"}:
                 raise ValueError("Invalid intent object")
             intent = answer["intent"]
@@ -126,6 +158,21 @@ def plan_readonly_task(prompt: str) -> str:
         return proposal
     finally:
         _LOCK.release()
+
+def support_workflow(intent: str) -> list[dict[str, Any]]:
+    """Compile the reviewed intent into a server-owned dependency description.
+
+    Related reads are deliberately serial: a denied order lookup stops the
+    compound request before any second read. The model cannot choose dependencies.
+    """
+    if intent not in PLANS and intent != "clarify":
+        raise InvalidPlan("Unknown reviewed intent")
+    tools = PLANS.get(intent, ())
+    return [
+        {"id": tool, "depends_on": list(tools[:index])}
+        for index, tool in enumerate(tools)
+    ]
+
 
 def _verify_step(gateway: ToolGateway, principal: Principal, *, trace: str,
                  request_id: str, tool: str, order_id: str, result: dict[str, Any]) -> None:
@@ -174,7 +221,8 @@ def iter_readonly_task(gateway: ToolGateway, principal: Principal, *,
     intent = plan_readonly_task(prompt)
     if not isinstance(intent, str) or (intent not in PLANS and intent != "clarify"):
         raise LocalRuntimeError("Invalid plan")
-    plan = list(PLANS.get(intent, ()))
+    workflow = support_workflow(intent)
+    plan = [node["id"] for node in workflow]
     steps = []
     timeline = [{"stage": "planning", "status": "reviewed"}]
     def response(status: str) -> dict[str, Any]:
@@ -199,9 +247,9 @@ def iter_readonly_task(gateway: ToolGateway, principal: Principal, *,
                 "clarify": "The task could not be interpreted consistently. Please rephrase it.",
             }[status]
         return {"answer": answer, "model": MODEL, "status": status, "trace_id": trace,
-                "plan": plan, "steps": steps, "timeline": timeline,
+                "plan": plan, "workflow": workflow, "steps": steps, "timeline": timeline,
                 "verified_steps": len(steps)}
-    yield {"type": "progress", "stage": "planning", "status": "reviewed", "plan": plan, "trace_id": trace}
+    yield {"type": "progress", "stage": "planning", "status": "reviewed", "plan": plan, "workflow": workflow, "trace_id": trace}
     if intent in ("unsupported", "clarify"):
         timeline.append({"stage": "planning", "status": intent})
         yield {"type": "result", "result": response(intent)}
@@ -209,7 +257,11 @@ def iter_readonly_task(gateway: ToolGateway, principal: Principal, *,
     # At most one fresh read of the whole compound plan. Never retry a denial
     # or failed audit verification; those must stop execution immediately.
     for attempt in range(2):
-        for tool in plan:
+        verified = set()
+        for node in workflow:
+            if not set(node["depends_on"]).issubset(verified):
+                raise LocalRuntimeError("Unverified workflow dependency")
+            tool = node["id"]
             request_id = str(uuid4())
             yield {"type": "progress", "stage": "tool", "status": "started", "tool": tool, "trace_id": trace}
             result = gateway.invoke(
@@ -225,6 +277,7 @@ def iter_readonly_task(gateway: ToolGateway, principal: Principal, *,
                 timeline.append({"stage": "completion", "status": "denied"})
                 yield {"type": "result", "result": response("denied")}
                 return
+            verified.add(tool)
         if len(steps) != 2:
             break
         order = steps[0]["result"]["order"]

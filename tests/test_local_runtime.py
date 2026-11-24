@@ -97,7 +97,7 @@ def test_model_invalid_json_retry(monkeypatch):
         }).encode()
         return obj
     opener = Mock()
-    opener.open.side_effect = [response("not-json"), response('{"intent":"both"}')]
+    opener.open.side_effect = [response("not-json"), response('{"reads":["order_details","refund_eligibility"]}')]
     monkeypatch.setattr(rt.urllib.request, "build_opener", lambda *args: opener)
     assert rt._classify("view both", review=False, deadline=time.monotonic()+30) == "both"
     assert opener.open.call_count == 2
@@ -263,3 +263,52 @@ def test_denial_and_evidence_failure_never_retry(monkeypatch, runtime):
         rt.run_readonly_task(gateway, principal,
                              prompt="view and check", order_id="sample-order")
     assert invoke.call_count == 1
+
+
+@pytest.mark.parametrize("payload, expected", [
+    ({"reads": []}, "unsupported"),
+    ({"reads": ["order_details"]}, "order_details"),
+    ({"reads": ["refund_eligibility"]}, "refund_eligibility"),
+    ({"reads": ["refund_eligibility", "order_details"]}, "both"),
+])
+def test_structured_read_proposal(payload, expected):
+    assert rt._proposal_intent(payload) == expected
+
+
+@pytest.mark.parametrize("payload", [
+    {"reads": ["write"]}, {"reads": ["order_details", "order_details"]},
+    {"reads": ["order_details"], "arguments": {"order_id": "other"}},
+    {"reads": "order_details"}, {"reads": [True]}, {"reads": [[]]},
+    {"intent": "both"}, {"reads": ["order_details", "refund_eligibility", "order_details"]},
+])
+def test_malformed_read_proposals_rejected(payload):
+    with pytest.raises(ValueError):
+        rt._proposal_intent(payload)
+
+
+def test_compiled_dependencies_are_server_owned(monkeypatch, runtime):
+    gateway, principal = runtime
+    monkeypatch.setattr(rt, "plan_readonly_task", lambda prompt: "both")
+    result = rt.run_readonly_task(gateway, principal, prompt="view and check", order_id="sample-order")
+    assert result["workflow"] == [
+        {"id": "get_order", "depends_on": []},
+        {"id": "check_refund_eligibility", "depends_on": ["get_order"]},
+    ]
+    assert result["verified_steps"] == 2
+    assert rt.support_workflow("clarify") == []
+    assert rt.support_workflow("refund_eligibility") == [
+        {"id": "check_refund_eligibility", "depends_on": []}
+    ]
+
+
+def test_unverified_dependency_stops_before_invocation(monkeypatch, runtime):
+    gateway, principal = runtime
+    monkeypatch.setattr(rt, "plan_readonly_task", lambda prompt: "both")
+    monkeypatch.setattr(rt, "support_workflow", lambda intent: [
+        {"id": "get_order", "depends_on": ["check_refund_eligibility"]}
+    ])
+    invoke = Mock()
+    monkeypatch.setattr(gateway, "invoke", invoke)
+    with pytest.raises(rt.LocalRuntimeError, match="dependency"):
+        rt.run_readonly_task(gateway, principal, prompt="view and check", order_id="sample-order")
+    invoke.assert_not_called()
