@@ -548,6 +548,24 @@ def create_app(
         except QueueBusy:
             raise HTTPException(status_code=429,detail="Job queue busy") from None
 
+    @app.post("/v1/agent/local-workflows/plan")
+    def plan_local_workflow(body: dict[str, Any] = Body(...),
+                            authorization: str | None = Header(default=None)):
+        gateway_tool_principal(authorization)
+        require_local_runtime()
+        from .workflow_planner import plan_workflow
+        from .local_runtime import LocalRuntimeError, public_runtime_error, InvalidPlan
+        if "objective" not in body or set(body)-{"objective","order_id"}:
+            raise HTTPException(status_code=422,detail="Invalid objective")
+        try:
+            return plan_workflow(body["objective"],body.get("order_id",""))
+        except ValueError:
+            raise HTTPException(status_code=422,detail="Invalid objective") from None
+        except InvalidPlan:
+            return {"status":"clarify","nodes":[],"message":"Model returned an invalid proposal. Refine the objective."}
+        except LocalRuntimeError as exc:
+            raise HTTPException(status_code=503,detail=public_runtime_error(exc)) from None
+
     @app.post("/v1/agent/local-workflows")
     def run_local_workflow(body: dict[str, Any] = Body(...),
                            authorization: str | None = Header(default=None)):

@@ -204,3 +204,7 @@ For detailed historical milestones and release gates, see the [previous README s
 ## License
 
 Released under the [MIT License](LICENSE). See [third-party notices](THIRD_PARTY_NOTICES.md) for applicable attribution.
+
+### Natural-language workflow preview
+
+Use the workflow builder's Generate plan button or POST /v1/agent/local-workflows/plan with an objective and optional order_id. The hybrid compiler grounds supported utility inputs and uses reviewed local Qwen classification for ambiguous support reads. Explicit 'then' clauses form dependency barriers; independent 'and' clauses may run together. Preview never executes tools. Review and submit the graph separately. Unsupported or ambiguous clauses require clarification; arbitrary natural-language tasks are not guaranteed.

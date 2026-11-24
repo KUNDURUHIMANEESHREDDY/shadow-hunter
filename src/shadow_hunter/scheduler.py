@@ -312,11 +312,9 @@ def execute_capability(principal,gateway,capability,resource):
     raise RuntimeError("No verified result")
 
 
-def execute_graph(principal,gateway,nodes):
-    """Execute explicit bounded DAGs; dependencies never override authorization."""
-    from concurrent.futures import ThreadPoolExecutor
+def validate_graph(nodes):
+    """Validate the complete graph without performing any action."""
     from .orchestration import DependencyLedger
-    DurableScheduler.owner(principal)
     if not isinstance(nodes,list) or not 1<=len(nodes)<=8:
         raise ValueError("Invalid graph size")
     by_id={}
@@ -330,6 +328,14 @@ def execute_graph(principal,gateway,nodes):
         by_id[name]=node
     ledger=DependencyLedger.compile([{"id":n["id"],"depends_on":n["depends_on"]} for n in nodes],
                                     allowed=frozenset(by_id),max_nodes=8)
+    return by_id,ledger
+
+
+def execute_graph(principal,gateway,nodes):
+    """Execute explicit bounded DAGs; dependencies never override authorization."""
+    from concurrent.futures import ThreadPoolExecutor
+    DurableScheduler.owner(principal)
+    by_id,ledger=validate_graph(nodes)
     results={}
     def run(name):
         n=by_id[name]

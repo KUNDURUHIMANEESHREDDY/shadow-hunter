@@ -250,3 +250,20 @@ def test_workflow_builder_browser(page,local_runtime_enabled,local_server):
     expect(page.locator("#workflow-result")).to_contain_text('"value": "2000"')
     page.locator("#disconnect").click()
     expect(page.locator("#workflow-result")).to_be_empty()
+
+
+def test_natural_language_workflow_preview_browser(page,local_runtime_enabled,local_server):
+    from playwright.sync_api import expect
+    page.goto(local_server+"/local-workspace")
+    page.locator("#token").fill(CUSTOMER_TOKEN)
+    page.locator("#connect").click()
+    expect(page.locator("#status")).to_have_text("Connected to local account.")
+    page.locator("#workflow-objective").fill("Summarize 1,2,3 then convert 2 km to m")
+    page.locator("#workflow-plan").click()
+    expect(page.locator("#workflow-plan-status")).to_contain_text("No tools were executed.")
+    assert json.loads(page.locator("#workflow-nodes").input_value())[1]["depends_on"]==["n1"]
+    expect(page.locator("#workflow-result")).to_be_empty()
+    page.locator("#workflow-run").click()
+    expect(page.locator("#workflow-result")).to_contain_text('"value": "2000"')
+    page.locator("#disconnect").click()
+    expect(page.locator("#workflow-objective")).to_have_value("")
