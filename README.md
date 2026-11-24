@@ -283,6 +283,12 @@ The local workspace supports authenticated order details and refund eligibility 
 
 Targeted Python 3.11 verification on the isolated checkout: **49 passed** across local runtime, read-only QA, gateway and policy tests; git diff check passed. The planner still uses a fixed support-intent catalog. General-purpose planning, live-model recovery testing and the full regression suite remain unverified in this cycle. No AWS deployment or new resources were involved.
 
+## Structured support planning — 24 November 2026
+
+Local Qwen now proposes a bounded list of requested read capabilities and a separate intent review checks agreement. The server compiles the reviewed proposal into a dependency description, checks dependencies before each invocation and retains deterministic policy enforcement. Related reads remain serial so an initial denial prevents further calls. No model-supplied resource identifiers or additional tools are accepted.
+
+Verification on an isolated Windows checkout: **63 targeted tests passed**, git diff check passed. A separate real Qwen 3.5 0.8B inference test against temporary synthetic SQLite data passed with one injected read inconsistency, one recovery, four correlated policy audit decisions, two final verified reads and completed task history. The HTTP E2E attempt was blocked at server startup because the isolated Python environment lacked the MCP server extra. Full regression and broader real-model benchmarks remain unverified. This is not arbitrary autonomous workflow generation or parallel execution. No cloud deployment or resources were involved.
+
 ## Local development
 
 Python 3.11+ is required. Install the API and optional AWS SDK with `python -m pip install -e ".[server,aws,dev]"`, then start the local API with `shadow-hunter-api`. The API listens on `127.0.0.1:8000` by default and serves the operator console at `/operator`.
