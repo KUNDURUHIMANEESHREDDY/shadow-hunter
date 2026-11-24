@@ -143,7 +143,21 @@ def _obvious_compound_read(prompt: str) -> bool:
     return bool(details and eligibility)
 
 
+def _explicit_change_request(prompt: str) -> bool:
+    """Stop direct change commands instead of silently reinterpreting as reads.
+
+    This narrow quality guard is not an authorization boundary.
+    """
+    return bool(re.match(
+        r"^\s*(?:please\s+)?(?:(?:submit|issue|process|execute|initiate|create|approve)\s+"
+        r"(?:(?:a|the|my)\s+)?refund\b|refund\s+(?:my|the|this)\s+(?:order|purchase)\b|"
+        r"cancel\s+(?:(?:my|the|this)\s+)?order\b)", prompt, re.IGNORECASE
+    ))
+
+
 def plan_readonly_task(prompt: str) -> str:
+    if _explicit_change_request(prompt):
+        return "unsupported"
     if not _LOCK.acquire(blocking=False):
         raise LocalRuntimeError("Local model busy")
     try:

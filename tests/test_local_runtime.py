@@ -312,3 +312,31 @@ def test_unverified_dependency_stops_before_invocation(monkeypatch, runtime):
     with pytest.raises(rt.LocalRuntimeError, match="dependency"):
         rt.run_readonly_task(gateway, principal, prompt="view and check", order_id="sample-order")
     invoke.assert_not_called()
+
+
+@pytest.mark.parametrize("prompt", [
+    "Submit a refund now.", "Please issue my refund.", "Cancel my order.",
+    "Refund this purchase.", "Process the refund.", "Approve a refund.",
+])
+def test_explicit_mutation_stops_before_model_or_gateway(monkeypatch, runtime, prompt):
+    gateway, principal = runtime
+    classifier = Mock()
+    invoke = Mock()
+    monkeypatch.setattr(rt, "_classify", classifier)
+    monkeypatch.setattr(gateway, "invoke", invoke)
+    result = rt.run_readonly_task(gateway, principal, prompt=prompt, order_id="sample-order")
+    assert result["status"] == "unsupported"
+    assert result["verified_steps"] == 0
+    classifier.assert_not_called()
+    invoke.assert_not_called()
+
+
+@pytest.mark.parametrize("prompt", [
+    "Check whether my order qualifies for a refund. Do not submit a refund.",
+    "Can this order be refunded?", "Please check refund eligibility.",
+])
+def test_read_questions_remain_available(monkeypatch, prompt):
+    classifier = Mock(return_value="refund_eligibility")
+    monkeypatch.setattr(rt, "_classify", classifier)
+    assert rt.plan_readonly_task(prompt) == "refund_eligibility"
+    assert classifier.call_count == 2

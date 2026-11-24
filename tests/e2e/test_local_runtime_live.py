@@ -151,3 +151,32 @@ def test_local_runtime_language_benchmark(local_runtime_enabled, local_server):
     print("WORKFLOW BENCHMARK: "+str(sum(outcomes))+"/"+str(len(outcomes)),flush=True)
     print("EXACT INTENT BENCHMARK: "+str(sum(exact))+"/"+str(len(exact)),flush=True)
     assert all(outcomes)
+
+
+@pytest.mark.skipif(os.environ.get("RUN_LOCAL_QWEN_E2E") != "1", reason="Explicit local Qwen opt-in")
+def test_local_support_intent_boundary_live(local_runtime_enabled, local_server):
+    cases = [
+        ("Which currency was my purchase in?", ["get_order"]),
+        ("How much is left to refund on my purchase?", ["get_order"]),
+        ("Please retrieve my order information.", ["get_order"]),
+        ("Does my purchase qualify for a refund?", ["check_refund_eligibility"]),
+        ("Could this order be refunded? Only check.", ["check_refund_eligibility"]),
+        ("Tell me if a refund is available.", ["check_refund_eligibility"]),
+        ("Show my purchase details and whether a refund is possible.", ["get_order", "check_refund_eligibility"]),
+        ("Which currency is my order in, and am I eligible for a refund?", ["get_order", "check_refund_eligibility"]),
+        ("Explain photosynthesis.", []),
+        ("Write a short poem.", []),
+        ("Cancel my order.", []),
+        ("Submit a refund now.", []),
+    ]
+    outcomes = []
+    for prompt, expected in cases:
+        result = post(local_server, prompt)
+        actual = [step["tool"] for step in result["steps"]]
+        ok = actual == expected and (result["status"] == "completed" if expected else
+                                     result["status"] in {"unsupported", "clarify"})
+        outcomes.append(ok)
+        print(json.dumps({"prompt": prompt, "status": result["status"],
+                          "expected": expected, "actual": actual, "pass": ok}), flush=True)
+    print(f"SUPPORT BOUNDARY BENCHMARK: {sum(outcomes)}/{len(outcomes)}", flush=True)
+    assert all(outcomes)
