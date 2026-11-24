@@ -273,18 +273,24 @@ def validate_resource(capability,resource):
 def public_repo_metadata(resource):
     import json
     import httpx2
+    from .recovery import TransientReadError
     if resource not in PUBLIC_REPOSITORIES:
         raise ValueError("Repository not approved")
     # Fixed HTTPS origin, exact public allowlist, no credentials or redirects.
-    with httpx2.Client(trust_env=False,follow_redirects=False,timeout=5) as client:
-        with client.stream("GET","https://api.github.com/repos/"+resource,
-                           headers={"Accept":"application/vnd.github+json","User-Agent":"Shadow-Hunter"}) as response:
-            response.raise_for_status()
-            data=bytearray()
-            for chunk in response.iter_bytes():
-                data.extend(chunk[:65537-len(data)])
-                if len(data)>65536:
-                    raise ValueError("Oversized response")
+    try:
+        with httpx2.Client(trust_env=False,follow_redirects=False,timeout=5) as client:
+            with client.stream("GET","https://api.github.com/repos/"+resource,
+                               headers={"Accept":"application/vnd.github+json","User-Agent":"Shadow-Hunter"}) as response:
+                if response.status_code in {502,503,504} and "Retry-After" not in response.headers:
+                    raise TransientReadError("Temporary upstream failure")
+                response.raise_for_status()
+                data=bytearray()
+                for chunk in response.iter_bytes():
+                    data.extend(chunk[:65537-len(data)])
+                    if len(data)>65536:
+                        raise ValueError("Oversized response")
+    except (httpx2.TimeoutException,httpx2.ConnectError,httpx2.ReadError) as exc:
+        raise TransientReadError("Temporary connection failure") from exc
     payload=json.loads(data)
     if payload.get("full_name")!=resource or payload.get("private") is not False:
         raise ValueError("Unverified repository")
@@ -325,30 +331,10 @@ def validate_graph(nodes):
 
 
 def execute_graph(principal,gateway,nodes):
-    """Execute explicit bounded DAGs; dependencies never override authorization."""
-    from concurrent.futures import ThreadPoolExecutor
+    """Execute explicit bounded DAGs with conservative read-only recovery."""
+    from .recovery import run_graph
     DurableScheduler.owner(principal)
     by_id,ledger=validate_graph(nodes)
-    results={}
-    def run(name):
-        n=by_id[name]
-        try:
-            return execute_capability(principal,gateway,n["capability"],n["resource"])
-        except Exception:
-            return {"status":"failed"}
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        while True:
-            ready=[name for name in ledger.ready() if name not in results]
-            if not ready:
-                break
-            # All graph nodes are validated before any execution.
-            futures={name:pool.submit(run,name) for name in ready[:2]}
-            for name,future in futures.items():
-                result=future.result()
-                results[name]=result
-                if result.get("status")=="completed":
-                    ledger.mark_verified(name)
-    for name in by_id:
-        results.setdefault(name,{"status":"blocked"})
-    return {"status":"completed" if all(r.get("status")=="completed" for r in results.values()) else "incomplete",
-            "nodes":results}
+    return run_graph(by_id,ledger,
+                     lambda capability,resource:execute_capability(principal,gateway,capability,resource),
+                     validate_resource)

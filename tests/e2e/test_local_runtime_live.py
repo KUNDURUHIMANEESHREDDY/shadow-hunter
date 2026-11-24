@@ -280,3 +280,19 @@ def test_capability_catalog_browser(page,local_runtime_enabled,local_server):
     page.locator("#disconnect").click()
     expect(page.locator("#job-capability option")).to_have_count(0)
     expect(page.locator("#job-add")).to_be_disabled()
+
+
+def test_workflow_recovery_report_browser(page,local_runtime_enabled,local_server):
+    from playwright.sync_api import expect
+    page.goto(local_server+"/local-workspace")
+    page.locator("#token").fill(CUSTOMER_TOKEN)
+    page.locator("#connect").click()
+    expect(page.locator("#status")).to_have_text("Connected to local account.")
+    page.locator("#workflow-example").click()
+    page.locator("#workflow-run").click()
+    expect(page.locator("#workflow-result")).to_contain_text('"recovery"')
+    result=json.loads(page.locator("#workflow-result").inner_text())
+    assert result["status"]=="completed"
+    assert result["recovery"]["retries"]==0
+    assert all(value==1 for value in result["recovery"]["attempts"].values())
+    assert result["recovery"]["revisions"][-1]["remaining"]=={}
