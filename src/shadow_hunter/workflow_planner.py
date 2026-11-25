@@ -30,7 +30,10 @@ def candidate_phases(objective,order_id=""):
         raise ValueError("Invalid objective")
     if not isinstance(order_id,str) or len(order_id)>128 or order_id!=order_id.strip():
         raise ValueError("Invalid order ID")
-    if CHANGE.search(objective) or re.search(r"\b(?:ignore|override|bypass|pretend|instead|except|unless)\b",objective,re.I):
+    # A negated or conditional objective must never be compiled as an
+    # affirmative read just because its keywords match the catalog.
+    normalized=objective.replace("\u2019","'").replace("\u2018","'")
+    if CHANGE.search(normalized) or re.search(r"\b(?:ignore|override|bypass|pretend|instead|except|unless|not|never|without|avoid|skip|if)\b|\b(?:don|doesn|didn|can|couldn|shouldn|wouldn|mustn|won)'t\b",normalized,re.I):
         return []
     phases=re.split(r"\b(?:and\s+then|then|afterwards|after that)\b",objective,flags=re.I)
     if len(phases)>8:

@@ -58,3 +58,16 @@ def test_api_preview_no_execute(tmp_path,monkeypatch):
         assert client.post(path,json=body).status_code==401
         result=client.post(path,json=body,headers={"Authorization":"Bearer test"})
         assert result.status_code==200 and result.json()["status"]=="preview"
+
+
+@pytest.mark.parametrize("objective",[
+    "Do not show my order details",
+    "Don't check refund eligibility",
+    "Don\u2019t show my order currency",
+    "Never retrieve my purchase",
+    "Skip order details and convert 2 km to m",
+    "Check refund eligibility if the order qualifies",
+])
+def test_negated_or_conditional_objectives_not_compiled(objective):
+    result=planner.plan_workflow(objective,"owned")
+    assert result["status"]=="clarify" and result["nodes"]==[]

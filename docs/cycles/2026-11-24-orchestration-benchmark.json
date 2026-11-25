@@ -1,0 +1,127 @@
+{
+  "cases": [
+    {
+      "case": "decimal conversion and dependency barrier",
+      "mode": "offline",
+      "status": "passed",
+      "elapsed_ms": 4
+    },
+    {
+      "case": "parallel branches and join",
+      "mode": "offline",
+      "status": "passed",
+      "elapsed_ms": 2
+    },
+    {
+      "case": "authorized support with audit verification",
+      "mode": "offline",
+      "status": "passed",
+      "elapsed_ms": 59
+    },
+    {
+      "case": "foreign order denial and independent continuation",
+      "mode": "offline",
+      "status": "passed",
+      "elapsed_ms": 24
+    },
+    {
+      "case": "reject: Summarize 1,2,3 and write a story",
+      "mode": "offline",
+      "status": "passed",
+      "elapsed_ms": 0
+    },
+    {
+      "case": "reject: Get repository metadata for unknown/project",
+      "mode": "offline",
+      "status": "passed",
+      "elapsed_ms": 0
+    },
+    {
+      "case": "reject: Delete my order",
+      "mode": "offline",
+      "status": "passed",
+      "elapsed_ms": 0
+    },
+    {
+      "case": "reject: Do not show my order details",
+      "mode": "offline",
+      "status": "passed",
+      "elapsed_ms": 0
+    },
+    {
+      "case": "reject: Don't check refund eligibility",
+      "mode": "offline",
+      "status": "passed",
+      "elapsed_ms": 0
+    },
+    {
+      "case": "disabled capability fails closed",
+      "mode": "offline",
+      "status": "passed",
+      "elapsed_ms": 2
+    },
+    {
+      "case": "transient failure recovery (injected)",
+      "mode": "offline",
+      "status": "passed",
+      "elapsed_ms": 252
+    },
+    {
+      "case": "false success rejected (injected)",
+      "mode": "offline",
+      "status": "passed",
+      "elapsed_ms": 1
+    },
+    {
+      "case": "persistent memory recall and clear",
+      "mode": "offline",
+      "status": "passed",
+      "elapsed_ms": 76
+    },
+    {
+      "case": "durable checkpoint resume without adapter replay",
+      "mode": "offline",
+      "status": "passed",
+      "elapsed_ms": 95
+    },
+    {
+      "case": "streamed verification and dependency ordering",
+      "mode": "offline",
+      "status": "passed",
+      "elapsed_ms": 1
+    },
+    {
+      "case": "Qwen: Please retrieve my purchase.",
+      "mode": "live_model",
+      "status": "passed",
+      "elapsed_ms": 1118
+    },
+    {
+      "case": "Qwen: Could I get a refund for this purchase?",
+      "mode": "live_model",
+      "status": "passed",
+      "elapsed_ms": 653
+    },
+    {
+      "case": "Qwen: What can you tell me about my purchase?",
+      "mode": "live_model",
+      "status": "passed",
+      "elapsed_ms": 569
+    },
+    {
+      "case": "local model readiness with independent probe",
+      "mode": "live_model",
+      "status": "passed",
+      "elapsed_ms": 155
+    },
+    {
+      "case": "live MCP discovery, fresh-source verification and local join",
+      "mode": "live_mcp",
+      "status": "passed",
+      "elapsed_ms": 4282
+    }
+  ],
+  "passed": 20,
+  "total": 20,
+  "scope": "bounded approved read-only workflows; offline fault injection separated from live services"
+}

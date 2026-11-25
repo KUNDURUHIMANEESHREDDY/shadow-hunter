@@ -1,0 +1,7 @@
+# Step 9: bounded autonomous orchestration benchmarks
+
+Added a reproducible benchmark runner with synthetic identities and isolated temporary SQLite state. Fifteen offline scenarios exercise deterministic planning, dependency joins, policy denial, disabled capability handling, injected transient errors and false completion, memory deletion, durable resume and event ordering. Four opt-in live-model checks use the actual local Qwen runtime and readiness probe. One opt-in live-MCP check starts a temporary companion, discovers its approved tools, retrieves live httpx package and Flask repository metadata, independently corroborates them and completes a dependent conversion.
+
+Initial evaluation: 18/20 passed. Two negated support objectives incorrectly compiled to affirmative reads. Fixed conservative negation/conditional screening (including contractions and curly apostrophes), and added six planner regression cases. The final benchmark passed 20/20, with 15/15 offline, 4/4 live model and 1/1 live MCP. The accompanying JSON retains measured case timings, not universal latency claims.
+
+Scope: supported, bounded read-only capabilities and synthetic accounts. The planner still uses conservative grounded patterns and reviewed intent classification; the benchmark is small and does not establish general-purpose autonomy, arbitrary website support, long-running reliability or unrestricted MCP integration.
