@@ -372,3 +372,44 @@ def test_saved_workflow_resume_browser(page,local_runtime_enabled,local_server):
     expect(page.locator("#checkpoint-list").get_by_text("Advance next step")).to_be_disabled()
     page.locator("#checkpoint-list").get_by_text("Delete saved workflow").click()
     expect(page.locator("#checkpoint-status")).to_have_text("0 saved workflows.")
+
+
+def test_live_orchestration_dashboard_browser(page,local_runtime_enabled,local_server):
+    from playwright.sync_api import expect
+    page.goto(local_server+"/local-workspace")
+    page.locator("#token").fill(CUSTOMER_TOKEN)
+    page.locator("#connect").click()
+    expect(page.locator("#status")).to_have_text("Connected to local account.")
+    page.locator("#workflow-example").click()
+    page.locator("#workflow-run").click()
+    expect(page.locator("#orch-status")).to_have_text("Workflow verified")
+    expect(page.locator("#orch-count")).to_have_text("2 / 2")
+    expect(page.locator("#orch-graph [data-state=completed]")).to_have_count(2)
+    expect(page.locator("#orch-timeline li[data-state=verifying]")).to_have_count(2)
+    expect(page.locator("#orch-retries")).to_have_text("0")
+    expect(page.get_by_role("progressbar",name="Verified workflow progress")).to_have_attribute("aria-valuenow","100")
+    expect(page.locator("#workflow-stop")).to_be_disabled()
+    page.locator("#disconnect").click()
+    expect(page.locator("#orch-graph")).to_be_empty()
+    expect(page.locator("#orch-timeline")).to_be_empty()
+    expect(page.locator("#orch-count")).to_have_text("0 / 0")
+
+
+def test_dashboard_denial_blocks_dependencies_browser(page,local_runtime_enabled,local_server):
+    from playwright.sync_api import expect
+    from .conftest import FOREIGN_ORDER
+    page.goto(local_server+"/local-workspace")
+    page.locator("#token").fill(CUSTOMER_TOKEN)
+    page.locator("#connect").click()
+    expect(page.locator("#status")).to_have_text("Connected to local account.")
+    nodes=[{"id":"denied","capability":"order_summary","resource":FOREIGN_ORDER,"depends_on":[]},
+           {"id":"child","capability":"unit_conversion","resource":"2:km_to_m","depends_on":["denied"]},
+           {"id":"independent","capability":"numeric_summary","resource":"1,2,3","depends_on":[]}]
+    page.locator("#workflow-nodes").fill(json.dumps(nodes))
+    page.locator("#workflow-run").click()
+    expect(page.locator("#orch-status")).to_have_text("Workflow incomplete")
+    expect(page.locator("#orch-count")).to_have_text("1 / 3")
+    expect(page.locator("#orch-graph [data-state=denied]")).to_have_count(1)
+    expect(page.locator("#orch-graph [data-state=blocked]")).to_have_count(1)
+    expect(page.locator("#orch-graph [data-state=completed]")).to_have_count(1)
+    expect(page.get_by_role("progressbar",name="Verified workflow progress")).to_have_attribute("aria-valuenow","33")

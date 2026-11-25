@@ -7,6 +7,7 @@ prerequisites block their descendants; independent nodes continue.
 from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 import time
+import threading
 from .result_verifier import VerificationError
 
 
@@ -20,7 +21,7 @@ BACKOFF_SECONDS=0.25
 RETRYABLE_CAPABILITIES=frozenset({"public_repo_metadata"})
 
 
-def run_graph(by_id, ledger, invoke, validate):
+def run_graph(by_id, ledger, invoke, validate, *, progress=None, cancellation=None, invoke_node=None):
     results={}
     attempts={name:0 for name in by_id}
     ready_after={}
@@ -28,9 +29,14 @@ def run_graph(by_id, ledger, invoke, validate):
     revisions=[]
     inflight={}
     retries=0
+    event_lock=threading.Lock()
 
     def event(name,state,**detail):
-        timeline.append({"node":name,"state":state,"attempt":attempts[name],**detail})
+        item={"node":name,"state":state,"attempt":attempts[name],**detail}
+        with event_lock:
+            timeline.append(item)
+            if progress is not None:
+                progress({"type":"node",**item})
 
     def snapshot():
         # Remove verified prerequisites only. Never weaken the original graph.
@@ -38,12 +44,17 @@ def run_graph(by_id, ledger, invoke, validate):
                                if results.get(dep,{}).get("status")!="completed")
                    for name,node in by_id.items() if name not in results}
         revisions.append({"revision":len(revisions)+1,"remaining":remaining})
+        if progress is not None:
+            progress({"type":"revision",**revisions[-1]})
 
     def execute(name):
         node=by_id[name]
         try:
             validate(node["capability"],node["resource"])
-            result=invoke(node["capability"],node["resource"])
+            if invoke_node is None:
+                result=invoke(node["capability"],node["resource"])
+            else:
+                result=invoke_node(node["capability"],node["resource"],lambda:event(name,"verifying"))
             if not isinstance(result,dict) or result.get("status") not in {"completed","denied"}:
                 return {"status":"failed","reason":"invalid_or_unverified_result"}
             return result
@@ -76,8 +87,11 @@ def run_graph(by_id, ledger, invoke, validate):
                         changed=True
                         snapshot()
             now=time.monotonic()
-            for name in ledger.ready():
-                if len(inflight)>=2:
+            stopping=cancellation is not None and cancellation.is_set()
+            if stopping:
+                ready_after.clear()
+            for name in (() if stopping else ledger.ready()):
+                if len(inflight)>=2 or (cancellation is not None and cancellation.is_set()):
                     break
                 if name in results or name in inflight or ready_after.get(name,0)>now:
                     continue
@@ -97,7 +111,7 @@ def run_graph(by_id, ledger, invoke, validate):
                     continue
                 del inflight[name]
                 result=future.result()
-                if result["status"]=="retryable" and attempts[name]<MAX_ATTEMPTS and retries<MAX_RETRIES:
+                if result["status"]=="retryable" and attempts[name]<MAX_ATTEMPTS and retries<MAX_RETRIES and not (cancellation is not None and cancellation.is_set()):
                     retries+=1
                     ready_after[name]=time.monotonic()+BACKOFF_SECONDS
                     event(name,"retry_scheduled",reason=result["reason"])
@@ -106,14 +120,19 @@ def run_graph(by_id, ledger, invoke, validate):
                 if result["status"]=="retryable":
                     result={"status":"failed","reason":"retry_budget_exhausted"}
                 results[name]=result
-                event(name,result["status"])
+                detail={}
+                if result["status"]=="completed":
+                    detail["verification"]=result.get("verification",{}).get("method","")
+                elif result.get("reason"):
+                    detail["reason"]=result["reason"]
+                event(name,result["status"],**detail)
                 if result["status"]=="completed":
                     ledger.mark_verified(name)
                 snapshot()
     for name in by_id:
         if name not in results:
-            results[name]={"status":"blocked","reason":"unresolved_dependencies"}
-            event(name,"blocked")
+            results[name]={"status":"blocked","reason":"stream_disconnected" if cancellation is not None and cancellation.is_set() else "unresolved_dependencies"}
+            event(name,"blocked",reason=results[name]["reason"])
     return {"status":"completed" if all(r["status"]=="completed" for r in results.values()) else "incomplete",
             "nodes":{name:results[name] for name in by_id},
             "recovery":{"attempts":attempts,"retries":retries,"timeline":timeline,"revisions":revisions}}

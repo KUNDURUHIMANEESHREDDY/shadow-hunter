@@ -664,41 +664,120 @@ def create_app(
         except WorkflowBusy:
             raise HTTPException(status_code=409,detail="Workflow running") from None
 
+    def workflow_inputs(body, authorization):
+        principal = gateway_tool_principal(authorization)
+        require_local_runtime()
+        from .scheduler import validate_graph
+        if "nodes" not in body or set(body)-{"nodes","remember"} or type(body.get("remember",False)) is not bool:
+            raise HTTPException(status_code=422,detail="Invalid workflow")
+        try:
+            validate_graph(body["nodes"])
+        except ValueError:
+            raise HTTPException(status_code=422,detail="Invalid workflow") from None
+        return principal
+
+    def execute_workflow_request(principal,body,*,progress=None,cancellation=None):
+        from .scheduler import execute_graph
+        memory=None
+        epoch=None
+        if body.get("remember"):
+            from .agent_memory import AgentMemory
+            try:
+                memory=AgentMemory(store)
+                epoch=memory.begin(principal)
+            except Exception:
+                memory=None
+        if progress is None:
+            result=execute_graph(principal,gateway,body["nodes"])
+        else:
+            result=execute_graph(principal,gateway,body["nodes"],progress=progress,cancellation=cancellation)
+        if cancellation is not None and cancellation.is_set():
+            return result
+        if body.get("remember") and memory is None:
+            result["memory_status"]="not_saved"
+        if memory is not None:
+            try:
+                result["memory_id"]=memory.remember(principal,epoch,body["nodes"],result)
+                result["memory_status"]="saved" if result["memory_id"] else "cleared_during_execution"
+            except Exception:
+                result["memory_status"]="not_saved"
+        return result
+
     @app.post("/v1/agent/local-workflows")
     def run_local_workflow(body: dict[str, Any] = Body(...),
                            authorization: str | None = Header(default=None)):
-        principal = gateway_tool_principal(authorization)
-        require_local_runtime()
-        from .scheduler import execute_graph
+        principal=workflow_inputs(body,authorization)
         from .local_runtime import _WORKFLOW_SLOTS
-        if "nodes" not in body or set(body)-{"nodes","remember"} or type(body.get("remember",False)) is not bool:
-            raise HTTPException(status_code=422,detail="Invalid workflow")
         if not _WORKFLOW_SLOTS.acquire(blocking=False):
             raise HTTPException(status_code=429,detail="Workflow capacity reached")
         try:
-            memory=None
-            epoch=None
-            if body.get("remember"):
-                from .agent_memory import AgentMemory
-                try:
-                    memory=AgentMemory(store)
-                    epoch=memory.begin(principal)
-                except Exception:
-                    memory=None
-            result=execute_graph(principal,gateway,body["nodes"])
-            if body.get("remember") and memory is None:
-                result["memory_status"]="not_saved"
-            if memory is not None:
-                try:
-                    result["memory_id"]=memory.remember(principal,epoch,body["nodes"],result)
-                    result["memory_status"]="saved" if result["memory_id"] else "cleared_during_execution"
-                except Exception:
-                    result["memory_status"]="not_saved"
-            return result
+            return execute_workflow_request(principal,body)
         except ValueError:
             raise HTTPException(status_code=422,detail="Invalid workflow") from None
         finally:
             _WORKFLOW_SLOTS.release()
+
+    @app.post("/v1/agent/local-workflows/stream")
+    def stream_local_workflow(body: dict[str, Any] = Body(...),
+                              authorization: str | None = Header(default=None)):
+        import asyncio
+        import json
+        import queue
+        import threading
+        import time
+        from .local_runtime import _WORKFLOW_SLOTS
+        principal=workflow_inputs(body,authorization)
+
+        async def events():
+            if not _WORKFLOW_SLOTS.acquire(blocking=False):
+                yield json.dumps({"type":"error","message":"Workflow capacity reached","sequence":1,"elapsed_ms":0})+"\n"
+                return
+            pending=queue.Queue(maxsize=128)
+            stop=threading.Event()
+            finished=threading.Event()
+            started=time.monotonic()
+            lock=threading.Lock()
+            sequence=0
+
+            def publish(item):
+                nonlocal sequence
+                with lock:
+                    if not stop.is_set():
+                        sequence+=1
+                        pending.put_nowait({**item,"sequence":sequence,"elapsed_ms":round((time.monotonic()-started)*1000)})
+
+            def worker():
+                try:
+                    publish({"type":"graph","nodes":[{"id":n["id"],"capability":n["capability"],"depends_on":n["depends_on"]} for n in body["nodes"]]})
+                    result=execute_workflow_request(principal,body,progress=publish,cancellation=stop)
+                    publish({"type":"result","result":result})
+                except Exception:
+                    try:
+                        publish({"type":"error","message":"Workflow execution unavailable"})
+                    except queue.Full:
+                        pass
+                finally:
+                    _WORKFLOW_SLOTS.release()
+                    finished.set()
+
+            try:
+                threading.Thread(target=worker,name="shadow-workflow-stream",daemon=True).start()
+            except Exception:
+                _WORKFLOW_SLOTS.release()
+                raise
+            try:
+                while not finished.is_set() or not pending.empty():
+                    try:
+                        item=pending.get_nowait()
+                    except queue.Empty:
+                        await asyncio.sleep(.025)
+                        continue
+                    yield json.dumps(item,allow_nan=False)+"\n"
+            finally:
+                stop.set()
+
+        return StreamingResponse(events(),media_type="application/x-ndjson",
+                                 headers={"Cache-Control":"no-store","X-Accel-Buffering":"no"})
 
     @app.post("/v1/agent/local-jobs/run-next")
     def run_next_local_job(authorization: str | None = Header(default=None)):

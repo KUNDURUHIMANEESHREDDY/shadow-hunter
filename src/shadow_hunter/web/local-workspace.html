@@ -5,6 +5,25 @@
 @media(max-width:1100px){.shell{grid-template-columns:190px minmax(0,1fr)}.sidebar{padding:22px 12px}.brand{gap:8px;font-size:15px}.topbar{padding:0 22px}main{padding:26px 22px}.columns{grid-template-columns:minmax(0,1fr) minmax(0,.8fr)}.panel-body,.activity-body{padding:18px}.panel-head{padding:17px 18px}.model-chip{display:none}}
 @media(max-width:860px){.shell{display:block}.sidebar{position:static;height:auto;flex-direction:row;align-items:center;border-right:0;border-bottom:1px solid var(--border);gap:10px;padding:12px 16px}.brand{margin:0 auto 0 0}.brand small,.nav-label,.side-footer,.nav svg{display:none}.nav{display:flex;flex-wrap:wrap}.nav a{padding:7px 9px;font-size:12px}.topbar{height:48px}.columns{grid-template-columns:1fr}.timeline-panel{min-height:0}.empty{min-height:150px}}
 @media(max-width:600px){main{padding:22px 14px}.topbar{padding:0 14px}.account{grid-template-columns:1fr;padding:17px}.account .runtime{border:0;border-top:1px solid var(--border);padding:15px 0 0}.brand{font-size:13px}.brandmark{width:32px;height:32px}.brandmark svg{width:23px;height:23px}.nav a{font-size:11px}.nav a[href="#history-section"]{display:none}.intro h1{font-size:32px}.tag{font-size:10px}.breadcrumb{font-size:11px}.panel-body,.activity-body{padding:16px}.panel-head{padding:16px}.actions button{flex:1}}
+
+.orch-dashboard{margin:18px 0;padding:17px;background:var(--sidebar);border:1px solid var(--border);border-radius:12px}
+.orch-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.orch-head h3{font-size:16px;letter-spacing:-.3px}.orch-head small{display:block;margin-top:3px}
+.orch-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:12px 0}
+.orch-metric{background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:10px 12px;min-width:0}
+.orch-metric small{display:block}.orch-metric strong{font-size:21px;font-variant-numeric:tabular-nums;display:block}
+.orch-progress{height:7px;border-radius:9px;overflow:hidden;background:var(--border);margin:12px 0 17px}
+.orch-progress span{display:block;height:100%;background:var(--accent);width:0%;transition:width .18s}
+.orch-graph-scroll{overflow:auto;border:1px solid var(--border);background:#0b1017;border-radius:10px;min-height:90px;padding:10px}
+.orch-graph-scroll svg{display:block;max-width:none}.orch-graph-scroll:empty:before{content:"Run a workflow to display its dependency graph.";color:var(--muted);display:block;padding:14px;font-size:12px}
+.orch-event-list{display:grid;gap:6px;max-height:300px;overflow:auto;margin:10px 0 0;padding:0;list-style:none}
+.orch-event-list li{display:grid;grid-template-columns:70px minmax(0,1fr);gap:9px;padding:8px 9px;background:var(--surface2);border-radius:7px;font-size:12px;overflow-wrap:anywhere}
+.orch-event-list time{font-variant-numeric:tabular-nums;color:var(--muted)}
+.orch-event-list li[data-state=completed]{border-left:2px solid var(--accent)}.orch-event-list li[data-state=failed],.orch-event-list li[data-state=denied]{border-left:2px solid #ff9e9e}
+.orch-event-list li[data-state=retry_scheduled]{border-left:2px solid #edbd73}
+.orch-subhead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:17px}.orch-subhead h4{margin:0;font-size:13px}
+@media(max-width:550px){.orch-metric{padding:8px}.orch-metric strong{font-size:17px}}
+@media(prefers-reduced-motion:reduce){.orch-progress span{transition:none}}
 </style></head>
 <body><div class="shell">
 <aside class="sidebar" aria-label="Workspace navigation">
@@ -30,16 +49,17 @@
 </div><section class="panel timeline-panel" aria-labelledby="activity-heading"><div class="panel-head"><div><h2 id="activity-heading">Live activity</h2><p>Planning, tool calls and verification.</p></div><span class="tag">02 / Trace</span></div><div class="activity-body"><ol id="activity" aria-live="polite"></ol><div class="empty"><div class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-6 4 12 3-6h4"/></svg></div><strong>Awaiting a task</strong><p>Activity will appear here as the agent works through each step.</p></div><div class="timeline-note">Policy checks are performed by the server. A progress event is not proof of successful execution.</div></div></section></div>
 <section class="panel history-panel" id="history-section" aria-labelledby="history-heading"><div class="panel-head"><div><h2 id="history-heading">Task history</h2><p>Review your account's recent task outcomes.</p></div><button id="refresh" class="secondary small" disabled>Refresh history</button></div><div class="table-wrap"><table><thead><tr><th>Trace ID</th><th>Status</th><th>Verified steps</th><th>Updated</th></tr></thead><tbody id="history"></tbody></table></div><div class="history-empty">No task history to display. Connect your account to get started.</div><div class="footnote">Only status, timestamps, trace ID and verified step count are persisted. A running entry after an interruption is not proof of active execution.</div></section>
 <section class="panel history-panel" aria-labelledby="jobs-heading"><div class="panel-head"><div><h2 id="jobs-heading">Independent jobs</h2><p>Queue approved capabilities for manual, one-time or bounded recurring execution.</p></div><button id="jobs-refresh" class="secondary small" disabled>Refresh jobs</button></div><div class="panel-body"><label for="job-capability">Approved capability</label><select id="job-capability"></select><div id="numeric-fields" hidden><label for="numeric-input">Comma-separated numbers (up to 16; non-sensitive)</label><input id="numeric-input" maxlength="128" placeholder="1, 2, 3"></div><label for="job-delay">Dispatch</label><select id="job-delay"><option value="">Manual</option><option value="0">Automatically now</option><option value="60">In 1 minute</option><option value="300">In 5 minutes</option><option value="1800">In 30 minutes</option><option value="3600">In 1 hour</option></select><label for="job-repeat">Repeat</label><select id="job-repeat"><option value="">Once</option><option value="60">Every minute (3 runs)</option><option value="300">Every 5 minutes (3 runs)</option><option value="3600">Hourly (3 runs)</option></select><p>Order jobs use the order ID above. For direct or MCP repository metadata enter python/cpython, pallets/flask or fastapi/fastapi. For MCP package metadata enter requests, httpx or fastapi. For conversion enter e.g. 2:km_to_m in the order ID field. Automatic jobs expire five minutes after their due time. Job inputs and status are stored locally; results and prompts are not persisted.</p><button id="job-add" disabled>Queue job</button> <button id="jobs-run" class="secondary" disabled>Run up to 4 jobs</button><p id="jobs-status" aria-live="polite"></p><pre id="jobs-result" aria-live="polite"></pre></div><div class="table-wrap"><table><thead><tr><th>Job ID</th><th>Capability</th><th>State</th><th>Action</th></tr></thead><tbody id="jobs-list"></tbody></table></div></section>
-<section class="panel history-panel" aria-labelledby="workflow-heading"><div class="panel-head"><div><h2 id="workflow-heading">Workflow builder</h2><p>Run a validated dependency graph using approved capabilities.</p></div></div><div class="panel-body"><p id="capability-summary" aria-live="polite">Connect to view approved capabilities.</p><button id="mcp-discover" class="secondary" disabled>Check MCP connections</button><p id="mcp-discovery-status" aria-live="polite"></p><label><input type="checkbox" id="workflow-use-memory" disabled> Include relevant historical context in preview</label><label for="workflow-objective">Describe your objective</label><textarea id="workflow-objective" rows="3" maxlength="1000" placeholder="Summarize 1, 2, 3 then convert 2 km to m" disabled></textarea><button id="workflow-plan" class="secondary" disabled>Generate plan</button><p id="workflow-plan-status" aria-live="polite">Review the generated nodes before running. Order tasks use the order ID above.</p><label for="workflow-nodes">Workflow nodes (JSON)</label><textarea id="workflow-nodes" rows="8" maxlength="12000" disabled></textarea><p>Maximum eight nodes; independent nodes may run together. Dependent nodes run only after their prerequisites complete. Temporary public metadata read failures may be retried once; denied or unverified prerequisites remain blocked. Successful nodes must pass independent evidence checks.</p><button id="workflow-example" class="secondary" disabled>Load example</button> <label><input type="checkbox" id="workflow-remember" disabled> Remember a sanitized outcome for 30 days</label><button id="workflow-run" disabled>Run workflow</button><pre id="workflow-result" aria-live="polite"></pre><section aria-label="Saved workflows"><h3>Saved workflows</h3><p>Save the exact approved utility or public-data inputs and verified outputs for up to 7 days. Private support workflows are not eligible. Advance one step at a time; no automatic replay.</p><button id="checkpoint-save" class="secondary" disabled>Save workflow for resume</button> <button id="checkpoint-refresh" class="secondary" disabled>View saved workflows</button><p id="checkpoint-status" aria-live="polite"></p><div id="checkpoint-list"></div></section><section aria-label="Workflow memory"><h3>Workflow memory</h3><p>Saved outcomes are historical, not current evidence. Private inputs and business results are excluded.</p><button id="memory-refresh" class="secondary" disabled>View memory</button> <button id="memory-clear" class="secondary" disabled>Clear all memory</button><p id="memory-status" aria-live="polite"></p><div id="memory-list"></div></section></div></section></main></div></div><script>
+<section class="panel history-panel" aria-labelledby="workflow-heading"><div class="panel-head"><div><h2 id="workflow-heading">Workflow builder</h2><p>Run a validated dependency graph using approved capabilities.</p></div></div><div class="panel-body"><p id="capability-summary" aria-live="polite">Connect to view approved capabilities.</p><button id="mcp-discover" class="secondary" disabled>Check MCP connections</button><p id="mcp-discovery-status" aria-live="polite"></p><label><input type="checkbox" id="workflow-use-memory" disabled> Include relevant historical context in preview</label><label for="workflow-objective">Describe your objective</label><textarea id="workflow-objective" rows="3" maxlength="1000" placeholder="Summarize 1, 2, 3 then convert 2 km to m" disabled></textarea><button id="workflow-plan" class="secondary" disabled>Generate plan</button><p id="workflow-plan-status" aria-live="polite">Review the generated nodes before running. Order tasks use the order ID above.</p><label for="workflow-nodes">Workflow nodes (JSON)</label><textarea id="workflow-nodes" rows="8" maxlength="12000" disabled></textarea><p>Maximum eight nodes; independent nodes may run together. Dependent nodes run only after their prerequisites complete. Temporary public metadata read failures may be retried once; denied or unverified prerequisites remain blocked. Successful nodes must pass independent evidence checks.</p><button id="workflow-example" class="secondary" disabled>Load example</button> <label><input type="checkbox" id="workflow-remember" disabled> Remember a sanitized outcome for 30 days</label><button id="workflow-run" disabled>Run workflow</button><section class="orch-dashboard" aria-label="Live orchestration dashboard"><div class="orch-head"><div><h3>Execution monitor</h3><small id="orch-status" aria-live="polite">Ready to run a workflow</small></div><button id="workflow-stop" class="secondary" disabled>Stop after active steps</button></div><div class="orch-metrics"><div class="orch-metric"><small>Verified nodes</small><strong id="orch-count">0 / 0</strong></div><div class="orch-metric"><small>Recovery attempts</small><strong id="orch-retries">0</strong></div><div class="orch-metric"><small>Elapsed</small><strong id="orch-elapsed">0.0 s</strong></div></div><div class="orch-progress" role="progressbar" aria-label="Verified workflow progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="orch-progress"></span></div><div class="orch-subhead"><h4>Dependency graph</h4><small id="orch-revision">No active graph</small></div><div id="orch-graph" class="orch-graph-scroll"></div><div class="orch-subhead"><h4>Live event timeline</h4><small>Server events</small></div><ol id="orch-timeline" class="orch-event-list" aria-label="Execution events"></ol></section><pre id="workflow-result" aria-live="polite"></pre><section aria-label="Saved workflows"><h3>Saved workflows</h3><p>Save the exact approved utility or public-data inputs and verified outputs for up to 7 days. Private support workflows are not eligible. Advance one step at a time; no automatic replay.</p><button id="checkpoint-save" class="secondary" disabled>Save workflow for resume</button> <button id="checkpoint-refresh" class="secondary" disabled>View saved workflows</button><p id="checkpoint-status" aria-live="polite"></p><div id="checkpoint-list"></div></section><section aria-label="Workflow memory"><h3>Workflow memory</h3><p>Saved outcomes are historical, not current evidence. Private inputs and business results are excluded.</p><button id="memory-refresh" class="secondary" disabled>View memory</button> <button id="memory-clear" class="secondary" disabled>Clear all memory</button><p id="memory-status" aria-live="polite"></p><div id="memory-list"></div></section></div></section></main></div></div><script>
 (() => {
 "use strict";
 const $ = id => document.getElementById(id);
 const base = location.pathname.replace(/\/local-workspace\/?$/, "");
-let token="", generation=0, controller=null, activeTrace=null;
+let token="", generation=0, controller=null, activeTrace=null, workflowAbort=null;
+  let graphNodes=[], graphStates=new Map(), graphRetries=0, graphElapsed=0;
 const status = text => $("status").textContent=text;
 const headers = () => ({"Authorization":"Bearer "+token,"Content-Type":"application/json"});
 document.querySelectorAll("[data-prompt]").forEach(button=>button.addEventListener("click",()=>{if(!controller){$("prompt").value=button.dataset.prompt;$("prompt").focus();}}));
-function setConnected(on) {for(const id of ["jobs-refresh","job-add","jobs-run","job-delay","job-repeat","job-capability","numeric-input","workflow-nodes","workflow-example","workflow-run","workflow-objective","workflow-plan","mcp-discover","workflow-use-memory","workflow-remember","memory-refresh","memory-clear","checkpoint-save","checkpoint-refresh"])$(id).disabled=!on;if(on)$("job-add").disabled=true;if(!on){$("job-capability").replaceChildren();$("jobs-list").replaceChildren();$("jobs-status").textContent="";$("jobs-result").textContent=""; $("numeric-input").value=""; $("workflow-nodes").value="";$("workflow-objective").value="";$("workflow-use-memory").checked=false;$("workflow-remember").checked=false;$("memory-list").replaceChildren();$("memory-status").textContent="";$("checkpoint-list").replaceChildren();$("checkpoint-status").textContent="";$("capability-summary").textContent="Connect to view approved capabilities.";$("mcp-discovery-status").textContent="";$("workflow-plan-status").textContent="Review the generated nodes before running.";$("workflow-result").textContent="";$("job-delay").value="";$("job-repeat").value="";$("job-capability").value="order_summary";$("numeric-fields").hidden=true;}$("run").disabled=!on;$("refresh").disabled=!on;$("disconnect").disabled=!on;$("model-check").disabled=!on;if(!on)$("model-status").textContent="";}
+function setConnected(on) {for(const id of ["jobs-refresh","job-add","jobs-run","job-delay","job-repeat","job-capability","numeric-input","workflow-nodes","workflow-example","workflow-run","workflow-objective","workflow-plan","mcp-discover","workflow-use-memory","workflow-remember","memory-refresh","memory-clear","checkpoint-save","checkpoint-refresh"])$(id).disabled=!on;if(on)$("job-add").disabled=true;if(!on){resetDashboard();$("workflow-stop").disabled=true;$("job-capability").replaceChildren();$("jobs-list").replaceChildren();$("jobs-status").textContent="";$("jobs-result").textContent=""; $("numeric-input").value=""; $("workflow-nodes").value="";$("workflow-objective").value="";$("workflow-use-memory").checked=false;$("workflow-remember").checked=false;$("memory-list").replaceChildren();$("memory-status").textContent="";$("checkpoint-list").replaceChildren();$("checkpoint-status").textContent="";$("capability-summary").textContent="Connect to view approved capabilities.";$("mcp-discovery-status").textContent="";$("workflow-plan-status").textContent="Review the generated nodes before running.";$("workflow-result").textContent="";$("job-delay").value="";$("job-repeat").value="";$("job-capability").value="order_summary";$("numeric-fields").hidden=true;}$("run").disabled=!on;$("refresh").disabled=!on;$("disconnect").disabled=!on;$("model-check").disabled=!on;if(!on)$("model-status").textContent="";}
 async function jobsRequest(path="",body=null){
   const gen=generation;
   const response=await fetch(base+"/v1/agent/local-jobs"+path,{headers:headers(),cache:"no-store",
@@ -217,19 +237,117 @@ $("workflow-example").onclick=()=>{
     {id:"conversion",capability:"unit_conversion",resource:"2:km_to_m",depends_on:["summary"]}
   ],null,2);
 };
+
+const stateLabels={pending:"Pending",running:"Running",verifying:"Verifying",completed:"Verified",retry_scheduled:"Retry queued",failed:"Failed",denied:"Denied",blocked:"Blocked"};
+const stateColors={pending:"#8291a3",running:"#82b5ff",verifying:"#c2a5ff",completed:"#72e1bf",retry_scheduled:"#edbd73",failed:"#ff9e9e",denied:"#ff9e9e",blocked:"#9ba7b4"};
+function resetDashboard(){
+  graphNodes=[];graphStates=new Map();graphRetries=0;graphElapsed=0;
+  $("orch-status").textContent="Ready to run a workflow";$("orch-count").textContent="0 / 0";
+  $("orch-retries").textContent="0";$("orch-elapsed").textContent="0.0 s";
+  $("orch-progress").style.width="0%";$("orch-progress").parentElement.setAttribute("aria-valuenow","0");
+  $("orch-graph").replaceChildren();$("orch-timeline").replaceChildren();$("orch-revision").textContent="No active graph";
+}
+function graphElement(tag,attrs={},text){
+  const el=document.createElementNS("http://www.w3.org/2000/svg",tag);
+  for(const [key,value] of Object.entries(attrs))el.setAttribute(key,String(value));
+  if(text!==undefined)el.textContent=text;
+  return el;
+}
+function drawGraph(){
+  const root=$("orch-graph");root.replaceChildren();
+  if(!graphNodes.length)return;
+  const lookup=new Map(graphNodes.map(n=>[n.id,n])),depth=new Map(),groups=new Map(),positions=new Map();
+  function level(id){if(depth.has(id))return depth.get(id);const n=lookup.get(id);const value=n.depends_on.length?1+Math.max(...n.depends_on.map(level)):0;depth.set(id,value);return value;}
+  for(const n of graphNodes){const l=level(n.id);if(!groups.has(l))groups.set(l,[]);groups.get(l).push(n);}
+  const cols=groups.size,rows=Math.max(...Array.from(groups.values(),x=>x.length));
+  const width=cols*248-28,height=rows*100-12;
+  const svg=graphElement("svg",{width,height,viewBox:"0 0 "+width+" "+height,role:"img","aria-label":"Workflow dependency graph"});
+  for(const [l,nodes] of groups)nodes.forEach((n,i)=>positions.set(n.id,{x:l*248,y:i*100+(rows-nodes.length)*50}));
+  for(const n of graphNodes){const end=positions.get(n.id);for(const dep of n.depends_on){
+    const start=positions.get(dep),sx=start.x+212,sy=start.y+39,ex=end.x,ey=end.y+39;
+    const mid=(sx+ex)/2;
+    svg.append(graphElement("path",{d:"M"+sx+" "+sy+" C"+mid+" "+sy+" "+mid+" "+ey+" "+(ex-7)+" "+ey,fill:"none",stroke:"#53667c","stroke-width":1.5}));
+    svg.append(graphElement("path",{d:"M"+(ex-12)+" "+(ey-4)+" L"+(ex-5)+" "+ey+" L"+(ex-12)+" "+(ey+4),fill:"none",stroke:"#53667c","stroke-width":1.5}));
+  }}
+  for(const n of graphNodes){
+    const pos=positions.get(n.id),state=graphStates.get(n.id)||"pending",color=stateColors[state]||stateColors.pending;
+    const g=graphElement("g",{transform:"translate("+pos.x+" "+pos.y+")","data-node":n.id,"data-state":state,"aria-label":n.id+" "+stateLabels[state]});
+    g.append(graphElement("rect",{width:212,height:78,rx:9,fill:"#151f2b",stroke:color,"stroke-width":1.2}));
+    g.append(graphElement("text",{x:11,y:17,fill:"#a1afbe","font-size":10},n.id.length>28?n.id.slice(0,25)+"...":n.id));
+    const label=n.capability.replaceAll("_"," ");
+    g.append(graphElement("text",{x:11,y:39,fill:"#eef3f8","font-size":12},label.length>29?label.slice(0,26)+"...":label));
+    g.append(graphElement("circle",{cx:15,cy:59,r:4,fill:color}));
+    g.append(graphElement("text",{x:25,y:63,fill:color,"font-size":11},stateLabels[state]||state));
+    svg.append(g);
+  }
+  root.append(svg);
+}
+function updateDashboard(event){
+  if(Number.isFinite(event.elapsed_ms))graphElapsed=Math.max(graphElapsed,event.elapsed_ms);
+  $("orch-elapsed").textContent=(graphElapsed/1000).toFixed(1)+" s";
+  if(event.type==="graph"){
+    graphNodes=event.nodes;graphStates=new Map(graphNodes.map(n=>[n.id,"pending"]));drawGraph();
+  }else if(event.type==="revision"){
+    $("orch-revision").textContent="Revision "+event.revision+" ? "+Object.keys(event.remaining).length+" remaining";
+  }else if(event.type==="node"){
+    graphStates.set(event.node,event.state);
+    if(event.state==="retry_scheduled")graphRetries++;
+    const li=document.createElement("li"),time=document.createElement("time"),detail=document.createElement("span");
+    li.dataset.state=event.state;time.textContent=(graphElapsed/1000).toFixed(2)+" s";
+    detail.textContent=event.node+" ? "+(stateLabels[event.state]||event.state)+" ? attempt "+event.attempt+(event.verification?" ? "+event.verification.replaceAll("_"," "):"")+(event.reason?" ? "+event.reason.replaceAll("_"," "):"");
+    li.append(time,detail);$("orch-timeline").append(li);drawGraph();
+  }
+  const verified=Array.from(graphStates.values()).filter(v=>v==="completed").length,total=graphNodes.length;
+  $("orch-count").textContent=verified+" / "+total;$("orch-retries").textContent=String(graphRetries);
+  const percentage=total?Math.round(100*verified/total):0;
+  $("orch-progress").style.width=percentage+"%";$("orch-progress").parentElement.setAttribute("aria-valuenow",String(percentage));
+}
+$("workflow-stop").onclick=()=>{if(workflowAbort)workflowAbort.abort();};
 $("workflow-run").onclick=async()=>{
-  if(!token)return;
-  const gen=generation;
-  $("workflow-run").disabled=true;
+  if(!token||workflowAbort)return;
+  const gen=generation,signal=new AbortController();workflowAbort=signal;
+  resetDashboard();$("orch-status").textContent="Connecting to execution stream...";
+  $("workflow-run").disabled=true;$("workflow-stop").disabled=false;
   $("workflow-result").textContent="Workflow running.";
+  let terminal=false,reader;
   try{
     const nodes=JSON.parse($("workflow-nodes").value);
-    const response=await fetch(base+"/v1/agent/local-workflows",{method:"POST",headers:headers(),cache:"no-store",body:JSON.stringify({nodes,remember:$("workflow-remember").checked})});
-    if(!response.ok)throw Error("Workflow unavailable");
-    const data=await response.json();
-    if(gen===generation)$("workflow-result").textContent=JSON.stringify(data,null,2);
-  }catch{if(gen===generation)$("workflow-result").textContent="Workflow rejected or unavailable.";}
-  finally{if(gen===generation)$("workflow-run").disabled=false;}
+    const response=await fetch(base+"/v1/agent/local-workflows/stream",{method:"POST",headers:headers(),cache:"no-store",signal:signal.signal,body:JSON.stringify({nodes,remember:$("workflow-remember").checked})});
+    if(!response.ok||!response.body)throw Error("Workflow unavailable");
+    reader=response.body.getReader();const decoder=new TextDecoder();let buffer="",lastSequence=0;
+    $("orch-status").textContent="Executing and verifying";
+    const handle=line=>{
+      if(!line.trim())return;
+      const event=JSON.parse(line);
+      if(event.type==="error")throw Error(event.message);
+      if(event.sequence!==lastSequence+1)throw Error("Stream sequence lost");
+      lastSequence=event.sequence;
+      if(gen!==generation||signal.signal.aborted)return;
+      updateDashboard(event);
+      if(event.type==="result"){
+        terminal=true;
+        $("workflow-result").textContent=JSON.stringify(event.result,null,2);
+        $("orch-status").textContent=event.result.status==="completed"?"Workflow verified":"Workflow incomplete";
+      }
+    };
+    while(true){
+      const chunk=await reader.read();if(chunk.done)break;
+      if(gen!==generation||signal.signal.aborted)return;
+      buffer+=decoder.decode(chunk.value,{stream:true});
+      let split;while((split=buffer.indexOf("\n"))!==-1){handle(buffer.slice(0,split));buffer=buffer.slice(split+1);}
+      if(buffer.length>524288)throw Error("Stream frame too large");
+    }
+    buffer+=decoder.decode();if(buffer.trim())handle(buffer);
+    if(!terminal)throw Error("Stream ended without result");
+  }catch{
+    if(gen===generation){
+      $("orch-status").textContent=signal.signal.aborted?"Stream stopped; active reads may finish":"Workflow rejected or stream interrupted";
+      $("workflow-result").textContent=signal.signal.aborted?"Stopped listening. No further steps will be started after the server observes disconnection.":"Workflow rejected or unavailable.";
+    }
+  }finally{
+    if(reader){try{await reader.cancel();}catch{}}
+    if(gen===generation&&workflowAbort===signal){workflowAbort=null;$("workflow-run").disabled=false;$("workflow-stop").disabled=true;}
+  }
 };
 async function history() {
   if(!token)return;
@@ -248,7 +366,7 @@ async function history() {
   }
 }
 function disconnect(){
-  generation++;if(controller)controller.abort();controller=null;activeTrace=null;token="";
+  generation++;if(workflowAbort)workflowAbort.abort();workflowAbort=null;if(controller)controller.abort();controller=null;activeTrace=null;token="";
   for(const id of ["token","order","prompt"])$(id).value="";
   $("activity").replaceChildren();$("history").replaceChildren();$("result").textContent="No result yet.";$("answer").textContent="";
   $("stop").disabled=true;setConnected(false);status("Not connected.");
@@ -262,7 +380,7 @@ $("connect").onclick=async()=>{
   catch{if(gen===generation){disconnect();status("Local authentication failed.");}}
 };
 function disconnectForConnect(){
-  generation++;if(controller)controller.abort();controller=null;activeTrace=null;token="";setConnected(false);
+  generation++;if(workflowAbort)workflowAbort.abort();workflowAbort=null;if(controller)controller.abort();controller=null;activeTrace=null;token="";setConnected(false);
   $("activity").replaceChildren();$("history").replaceChildren();$("result").textContent="No result yet.";$("answer").textContent="";$("order").value="";$("prompt").value="";$("stop").disabled=true;
 }
 $("disconnect").onclick=disconnect;

@@ -317,9 +317,11 @@ def execute_capability(principal,gateway,capability,resource):
     raise RuntimeError("No verified result")
 
 
-def execute_verified_capability(principal,gateway,capability,resource):
+def execute_verified_capability(principal,gateway,capability,resource, *, before_verify=None):
     from .result_verifier import verify
     result=execute_capability(principal,gateway,capability,resource)
+    if before_verify is not None:
+        before_verify()
     return verify(principal,gateway,capability,resource,result)
 
 
@@ -342,11 +344,17 @@ def validate_graph(nodes):
     return by_id,ledger
 
 
-def execute_graph(principal,gateway,nodes):
+def execute_graph(principal,gateway,nodes, *, progress=None, cancellation=None):
     """Execute explicit bounded DAGs with conservative read-only recovery."""
     from .recovery import run_graph
     DurableScheduler.owner(principal)
     by_id,ledger=validate_graph(nodes)
+    if progress is None and cancellation is None:
+        return run_graph(by_id,ledger,
+                         lambda capability,resource:execute_verified_capability(principal,gateway,capability,resource),
+                         validate_resource)
     return run_graph(by_id,ledger,
                      lambda capability,resource:execute_verified_capability(principal,gateway,capability,resource),
-                     validate_resource)
+                     validate_resource,progress=progress,cancellation=cancellation,
+                     invoke_node=lambda capability,resource,callback:execute_verified_capability(
+                         principal,gateway,capability,resource,before_verify=callback))
